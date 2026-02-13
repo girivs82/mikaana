@@ -299,6 +299,82 @@ This turns FMEDA from a late-stage manual audit into a design-time feedback loop
 
 ---
 
+## Standard Library: Types as Library, Not Language
+
+Most HDLs bake their type systems into the language. Want a new floating-point format? Wait for the next language revision. skalp takes a different approach: the type system is expressive enough that complex types like floating-point are *library definitions*, not language primitives.
+
+### Floating-Point Is Not Built In
+
+`fp32` in skalp is not a keyword — it's a set of stdlib functions that operate on `bit[32]` according to IEEE 754 layout:
+
+```
+// fp32 is just bit manipulation on a 32-bit vector
+pub fn fp32_sign(x: bit[32]) -> bit[1] { x[31:31] }
+pub fn fp32_exp(x: bit[32]) -> bit[8] { x[30:23] }
+pub fn fp32_mantissa(x: bit[32]) -> bit[23] { x[22:0] }
+
+pub fn fp32_pack(sign: bit[1], exp: bit[8], mantissa: bit[23]) -> bit[32] {
+    (sign as bit[32] << 31) | (exp as bit[32] << 23) | mantissa as bit[32]
+}
+```
+
+Multiplication, addition, comparison, classification — all built on top of these primitives as synthesizable hardware operations. The same pattern defines `fp16` (1/5/10), `fp64` (1/11/52), and will define `bfloat16` and `tf32` for ML workloads.
+
+**Why this matters:** if you need a custom 24-bit float format for your specific application, you define it in your own library using the same mechanisms the stdlib uses. You're not waiting for a language update — you're writing library code. And because the compiler sees the bit-level operations, it can optimize them the same way it optimizes any other hardware.
+
+### The Trait System
+
+Traits define what a type can do in hardware:
+
+```
+trait FloatingPoint {
+    const WIDTH: nat
+    const EXP_WIDTH: nat
+    const MANT_WIDTH: nat
+
+    fn add(self, other: Self) -> Self
+    fn mul(self, other: Self) -> Self
+    fn is_nan(self) -> bit
+    fn zero() -> Self
+}
+```
+
+Generic entities use trait bounds to work with any conforming type:
+
+```
+entity Vec2Add<T> where T: Synthesizable {
+    in a: vec2<T>
+    in b: vec2<T>
+    out result: vec2<T>
+}
+```
+
+This is how the stdlib defines vector operations that work across `fp32`, `fp16`, fixed-point, or any user-defined numeric type. One implementation, any element type, fully specialized at compile time through monomorphization.
+
+### What's in the Standard Library
+
+**Floating-point** (fp16, fp32, fp64): full IEEE 754 arithmetic, comparison, classification. Transcendental functions — sin, cos, tan, atan2, ln, exp, pow, sqrt — implemented as Newton-Raphson iterations and Taylor series approximations, all synthesizable to RTL. Fast inverse sqrt uses the Quake III algorithm adapted for hardware.
+
+**Fixed-point** (Q15.16, Q31.32): add, subtract, multiply with saturation arithmetic. Conversions to and from floating-point. Overflow detection.
+
+**Vectors** (vec2, vec3, vec4): component-wise arithmetic, dot product, cross product, normalize (accurate and fast variants), reflect, project, reject, lerp, distance. The Phong and Blinn-Phong shading examples in the repo are built entirely from these stdlib operations.
+
+**Bit manipulation**: clz, ctz, popcount, bitreverse, ffs, fls, parity, sign extension, power-of-2 checks, Gray code encoding/decoding, byte swapping, alignment utilities, bitfield extract/insert.
+
+**Math**: min, max, abs, clamp, lerp, smoothstep, FMA/FMS, floor, ceil, round, fract, modulo.
+
+**Reusable components**: parameterized adders, counters, FIFOs, shifters, multiplexers — each generic over width and depth.
+
+**Interface protocols**: AXI4, AXI4-Lite, Avalon MM, Wishbone bus definitions.
+
+### The Design Principle
+
+The stdlib is built on composition. `clamp` is composed of `max` and `min`. `normalize` uses `dot`, `rsqrt`, and scalar multiply. Nothing is magic — you can read the implementation of any stdlib operation and see the hardware it generates.
+
+The boundary between language and library is deliberate: the *language* provides the type system, generic instantiation, trait bounds, and synthesis semantics. The *library* provides the types themselves, their operations, and hardware-specific implementations. This keeps the language small and the ecosystem extensible.
+
+---
+
 ## What Makes This Different
 
 The philosophical difference from other modern HDLs (like Veryl or Chisel):
