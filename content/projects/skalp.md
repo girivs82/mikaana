@@ -633,6 +633,4 @@ The compiler pipeline from source through HIR, MIR, and SystemVerilog codegen is
 
 The synthesis backend is implemented with AIG optimization, technology mapping, and cell sizing across multiple target libraries. The native place-and-route engine targets iCE40 FPGAs with analytical and simulated annealing placement, PathFinder routing, and IceStorm bitstream generation.
 
-The LSP server, formatter, linter, and package manager are implemented. Simulation is architecturally complete with the cone-based evaluation model but GPU acceleration (Metal on macOS) is still being integrated into the runtime.
-
-Active work is focused on expanding the standard library, completing the GPU simulation backend, and building out the documentation.
+The LSP server, formatter, linter, package manager, and GPU-accelerated simulation backend (Metal on macOS) are implemented. The standard library covers floating-point, fixed-point, vectors, bit manipulation, math, and reusable components with full trait-based extensibility.
