@@ -575,6 +575,8 @@ The philosophical difference from other modern HDLs (like Veryl or Chisel):
 
 **skalp's bet**: clock domain safety and intent preservation are worth a new language. Not a better syntax for an old language — a fundamentally different compilation model where the things that cause the worst bugs (CDC violations, lost intent, width mismatches) are structurally impossible.
 
+skalp is also the only tooling ecosystem with first-class support for **Null Convention Logic** — asynchronous, clockless circuits using dual-rail encoding and threshold gates. No other HDL or synthesis tool provides integrated NCL support: from language-level dual-rail signal declaration through synthesis (C-element mapping, TH22 threshold gates) to place and route. If you're designing delay-insensitive or self-timed circuits, there is currently no other option with end-to-end tooling.
+
 | | skalp | SystemVerilog | VHDL | Chisel | Veryl |
 |---|---|---|---|---|---|
 | CDC safety | Compile-time (type system) | None | None | None | Manual annotations |
@@ -585,6 +587,7 @@ The philosophical difference from other modern HDLs (like Veryl or Chisel):
 | Fault injection / FMEDA | Integrated, measured DC | None | None | None | None |
 | Syntax | Rust-inspired, expression-based | C-like, statement-based | Verbose | Scala DSL | Rust-inspired |
 | Synthesis | Built-in (AIG, tech mapping, cell sizing) | External tools | External tools | External tools | External tools |
+| Async / NCL | First-class (dual-rail, C-elements, TH gates) | None | None | None | None |
 | Place & Route | Native (iCE40, bitstream gen) | External tools | External tools | External tools | None |
 | Output | SV, VHDL, Verilog, bitstream | Native | Native | Verilog | SystemVerilog |
 
