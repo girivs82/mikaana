@@ -377,6 +377,194 @@ The boundary between language and library is deliberate: the *language* provides
 
 ---
 
+## Synthesis: From Words to Gates
+
+The synthesis backend lives in `skalp-lir` and `skalp-backends`. It takes the MIR and lowers it through a word-level intermediate (LIR) to a gate-level netlist, then optimizes that netlist using an ABC-inspired AIG optimization engine.
+
+### Why a Word-Level LIR?
+
+Most synthesis flows eagerly decompose everything to individual bits before optimization. skalp deliberately preserves multi-bit operations in the LIR:
+
+```
+LIR: Add { width: 8, has_carry: true }
+     Mux2 { width: 32, sel_pos: 0 }
+     Reg { width: 16, reset_value: 0 }
+```
+
+Why? Technology libraries may have compound cells — `ADDER8`, `DPMUX4`, `AOI22` — that directly implement multi-bit operations. If you decompose to bits before mapping, you lose the chance to use them. The mapper decomposes as needed during technology mapping, falling back to per-bit logic when compound cells aren't available.
+
+### Technology Mapping with Truth Tables
+
+The mapper assigns LIR operations to library cells by matching truth tables. Each cell function is encoded as a truth table with input permutations:
+
+```
+And2  → 0x8 (1000b)     Nand2 → 0x7 (0111b)
+Or2   → 0xE (1110b)     Xor2  → 0x6 (0110b)
+Aoi21 → 0x15            Mux2  → 0xCA (with 6 permutations)
+```
+
+When a direct match isn't available, the mapper tries inversion absorption — implementing the inverted function with fewer gates (NAND instead of AND + inverter). Multi-input gates are handled by enumerating input permutations and matching against the library's available cells.
+
+Multi-bit signals expand to per-bit nets (e.g., `result[7]`, `result[0]`), but the expansion happens at the mapping boundary, not the IR level. This keeps the optimization pipeline working at the word level as long as possible.
+
+### AIG Optimization Engine
+
+After technology mapping, the gate netlist is converted to an **And-Inverter Graph** — where every operation is decomposed to 2-input ANDs with inverted literals — and run through ABC-inspired optimization passes:
+
+**FRAIG (Functionally Reduced AIG):** SAT-based equivalence detection. Simulates 64-bit random patterns to identify candidate equivalent nodes, then proves or disproves equivalence via SAT solving (checking if `node₁ XOR node₂` is UNSAT). Counterexamples from SAT refine the equivalence classes. Configurable conflict limits (1,000 per SAT call, 10,000 total) prevent runaway solving on hard instances.
+
+**Register retiming:** Leiserson-Saxe algorithm for moving registers across combinational logic to balance path delays. Configurable target period (default 10ns/100MHz, with a `high_frequency()` preset targeting 2ns/500MHz). Supports both forward and backward retiming.
+
+**Balance:** Reduces AIG depth by restructuring the AND tree. Shorter depth means fewer logic levels and higher clock frequency.
+
+**Rewrite and Refactor:** Pattern-based and structural rewriting passes that replace subgraphs with functionally equivalent but smaller or faster alternatives.
+
+**Constant propagation and DCE:** Standard compiler passes adapted for hardware — propagate known values and eliminate dead logic.
+
+These compose into synthesis presets:
+
+| Preset | Strategy |
+|--------|----------|
+| Quick | Minimal passes for fast turnaround |
+| Balanced | Default — good quality-of-results vs. runtime |
+| Full | Maximum effort, all passes |
+| Timing | Prioritize meeting clock constraints |
+| Area | Minimize gate count |
+| Resyn2 | ABC's proven sequence: balance → rewrite → refactor → balance → rewrite → rewrite‑z → balance → refactor‑z → rewrite‑z → balance |
+| Compress2 | ABC's area-focused script with resubstitution |
+| Auto | Run multiple presets in parallel, pick best result |
+
+### Cell Sizing
+
+After mapping, cells are upsized based on fanout to ensure adequate drive strength:
+
+```
+≤2 fanout → X1 (base drive)
+≤4 fanout → X2
+≤8 fanout → X4
+≤16 fanout → X8
+```
+
+Timing-driven sizing upsizes cells on critical paths when slack falls below a target threshold.
+
+### Power Domain Barriers
+
+In the AIG, power domain crossings are represented as **barrier nodes** — level shifters, isolation cells, retention flip-flops, power switches — that the optimizer is forbidden from optimizing through. This prevents the synthesis engine from accidentally simplifying logic across power domain boundaries, which would break isolation.
+
+The barrier types include: level shifters (low→high and high→low), always-on buffers, isolation cells (AND/OR/latch variants), retention DFFs, power switches (PMOS header, NMOS footer), and I/O pads (input, output, bidirectional, clock, analog). Each carries enable signals and reset connections appropriate to its function.
+
+### NCL (Null Convention Logic) Support
+
+The mapper has first-class support for asynchronous circuits using Null Convention Logic. When it detects dual-rail signals (names ending in `_t` for true rail, `_f` for false rail), it maps AND operations to C-elements (threshold gates, TH22) instead of regular AND gates. If the target library has TH22 cells, they're used directly; otherwise, the mapper synthesizes a C-element from standard logic: `Q = (a & b) | (Q & (a | b))`.
+
+### Target Platforms
+
+The backend supports multiple targets through a unified configuration interface:
+
+**FPGA:** Lattice iCE40 (4-input LUTs, carry chains), Xilinx 7-Series (6-input LUTs, DSP slices, hardened multipliers), Intel Cyclone V
+
+**ASIC:** FreePDK45 (open-source 45nm), SkyWater 130nm (open-source 130nm), and generic standard cell libraries via Liberty (.lib) and LEF files
+
+Each target defines its primitive library, and the tech mapper selects cells accordingly. Library cells carry timing arcs across seven process corners (TT, SS, FF, SF, FS, SSLV, FFHV) for multi-corner timing analysis, voltage sensitivity rankings for brownout simulation, and FIT rates for safety analysis — all flowing through to the FMEDA.
+
+---
+
+## Place and Route: From Netlist to Bitstream
+
+skalp includes a native place-and-route engine (`skalp-place-route`) targeting iCE40 FPGAs. Rather than depending on vendor tools, the P&R generates IceStorm-compatible bitstreams directly — from gate-level netlist to programming file in a single toolchain.
+
+### The Pipeline
+
+```
+Gate Netlist
+    ↓
+Packing — combine LUT+DFF cells into logic cells
+    ↓
+Placement — assign cells to physical locations on the FPGA
+    ↓
+Routing — connect cells through the routing fabric
+    ↓
+Timing Analysis — compute critical paths, check constraints
+    ↓
+Bitstream Generation — produce IceStorm ASCII format
+```
+
+### Placement
+
+The placer implements seven algorithms, selectable per design:
+
+**Analytical placement** solves a quadratic wirelength minimization problem using conjugate gradient. It builds a Laplacian connectivity matrix from the netlist — each net contributes edge weights inversely proportional to its fanout (clique model) — then solves `Lx = b` for X and Y coordinates simultaneously. I/O cells are anchored to chip boundaries with 100x weight to keep them at the edges. The result is continuous coordinates that get snapped to valid BEL sites during legalization.
+
+**Simulated annealing** starts from an initial placement and iteratively proposes swaps (exchange two cells) or relocations (move a cell to a new site). Each move is evaluated using half-perimeter wirelength (HPWL), accepted or rejected via Boltzmann probability `P = exp(-ΔCost / T)`, and the temperature cools geometrically. The implementation supports **parallel move evaluation** using Rayon — batches of independent moves are evaluated concurrently, significantly reducing runtime for large designs.
+
+**Hybrid approaches** combine both: analytical placement produces a good starting point, legalization snaps it to valid sites, then simulated annealing refines locally. Timing-driven variants weight moves by net criticality, biasing 30% of SA moves toward cells on critical paths.
+
+**Legalization** uses an expanding ring search: starting from the analytical solution's coordinates, it searches outward ring-by-ring for the nearest compatible, unoccupied BEL. The BEL compatibility matrix handles the fact that in iCE40, all flip-flop variants (DFF, DFFE, DFFSR, DFFSR+E) map to the same hardware with different configuration bits.
+
+### Routing
+
+Routing uses a three-phase approach:
+
+**Phase 1: Global nets.** Clocks and resets are routed through the 8 dedicated GBUF (Global Buffer) networks first. These have near-zero skew and minimal delay (~50ps) but are a limited resource. Nets that can't fit in global networks fall back to regular routing.
+
+**Phase 2: Carry chains.** Dedicated carry chain wires connect adjacent logic cells vertically. These are deterministic (fixed connectivity) and handled before regular routing to avoid congestion on the dedicated resources.
+
+**Phase 3: Regular nets via PathFinder.** The core routing algorithm is **PathFinder with A\* search** — a negotiated congestion approach where nets compete for shared routing resources across multiple iterations:
+
+1. Route all nets using A* shortest-path with Manhattan distance heuristic
+2. Identify congested wires (usage > capacity)
+3. Rip up nets that use congested wires
+4. Increase history costs on congested wires
+5. Reroute with updated costs
+6. Repeat until no congestion remains
+
+The cost function balances three components:
+
+```
+cost = base_pip_cost × congestion_multiplier + delay_contribution
+```
+
+Where congestion is `present_factor × (1 + overuse)` for overused wires (present factor = 1.5), plus accumulated history cost from previous iterations (history factor = 1.0). The history cost prevents the router from oscillating between the same bad solutions — once a wire is congested, it stays expensive even after rip-up.
+
+A* explores the routing graph through **PIPs** (Programmable Interconnect Points) — configurable switches that connect one wire to another. Each PIP has a base cost and delay. Timing-driven routing adds delay contribution to the cost function, weighting it by net criticality.
+
+### iCE40 Architecture Model
+
+The device database models the complete iCE40 architecture:
+
+**Variants:** HX1K (13×17 grid, 1280 LUTs), HX4K (17×17, 3520 LUTs), HX8K (33×33, 7680 LUTs), plus LP (low-power) equivalents and UP5K (25×21, 5280 LUTs with DSP blocks)
+
+**Tile types:** Logic (8 LUTs + 8 FFs + carry chain), I/O (top/bottom/left/right), RAM, Global Buffer, PLL, DSP
+
+**Wire types:** Local (within tile), Span-4 (4-tile horizontal/vertical), Span-12 (long lines), Neighbour (adjacent tiles), Carry Chain (dedicated vertical), Global (8 clock networks)
+
+The device loads from real IceStorm chipdb files when available, mapping BEL pins to wire IDs and constructing the full PIP connectivity graph. A synthetic fallback generates the architecture model from variant parameters when chipdb files aren't present.
+
+### Bitstream Generation
+
+The output is IceStorm ASCII format — a text representation of the FPGA configuration that IceStorm tools (`icepack`) convert to binary bitstream. Each logic tile is a 16×54 bit matrix encoding LUT truth tables (16 bits per logic cell), DFF configuration (negative clock, carry enable, DFF enable, set/reset mode), and routing switch settings. I/O tiles encode pin type (input mode, output select, tristate control, pull-up enable). RAM tiles encode memory initialization and port configuration.
+
+The generator also produces a utilization report with resource usage, timing summary, and critical path information.
+
+### Timing Analysis
+
+Static timing analysis uses variant-specific delay models:
+
+| Component | HX | LP | UP |
+|-----------|-----|-----|-----|
+| LUT4 | 0.54ns | 0.65ns | 0.70ns |
+| DFF clk-to-Q | 0.85ns | 0.85ns | 0.85ns |
+| DFF setup | 0.18ns | 0.18ns | 0.18ns |
+| Carry (per bit) | 0.09ns | 0.09ns | 0.09ns |
+| Local wire | 0.05ns | 0.05ns | 0.05ns |
+| Span-4 | 0.20ns | 0.20ns | 0.20ns |
+| Span-12 | 0.40ns | 0.40ns | 0.40ns |
+| RAM read | 3.50ns | 3.50ns | 3.50ns |
+
+The analyzer finds clock domains, builds a timing graph from placement and routing data, and reports worst negative slack, failing paths, and achievable frequency.
+
+---
+
 ## What Makes This Different
 
 The philosophical difference from other modern HDLs (like Veryl or Chisel):
@@ -396,6 +584,8 @@ The philosophical difference from other modern HDLs (like Veryl or Chisel):
 | Equivalence checking | Built-in (AIG + SAT) | External tools | External tools | None | None |
 | Fault injection / FMEDA | Integrated, measured DC | None | None | None | None |
 | Syntax | Rust-inspired, expression-based | C-like, statement-based | Verbose | Scala DSL | Rust-inspired |
+| Synthesis | Built-in (AIG, tech mapping, cell sizing) | External tools | External tools | External tools | External tools |
+| Place & Route | Native (iCE40, bitstream gen) | External tools | External tools | External tools | None |
 | Output | SV, VHDL, Verilog, bitstream | Native | Native | Verilog | SystemVerilog |
 
 ---
@@ -437,6 +627,8 @@ examples/
 ## Current Status
 
 The compiler pipeline from source through HIR, MIR, and SystemVerilog codegen is functional. The frontend parses the full language grammar, the type checker catches CDC violations and width mismatches, and the codegen produces synthesizable SystemVerilog with proper synchronizers and memory inference.
+
+The synthesis backend is implemented with AIG optimization, technology mapping, and cell sizing across multiple target libraries. The native place-and-route engine targets iCE40 FPGAs with analytical and simulated annealing placement, PathFinder routing, and IceStorm bitstream generation.
 
 The LSP server, formatter, linter, and package manager are implemented. Simulation is architecturally complete with the cone-based evaluation model but GPU acceleration (Metal on macOS) is still being integrated into the runtime.
 
