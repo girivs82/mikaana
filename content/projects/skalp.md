@@ -197,16 +197,105 @@ This cone-based approach is designed for GPU parallelization — the dependency 
 
 ---
 
-## Safety Analysis
+## Equivalence Checking
 
-skalp includes ISO 26262 functional safety analysis for automotive and safety-critical applications. The analyzer runs DC analysis on the synthesized netlist and applies configurable derating factors:
+One thing I wanted from the start: if the compiler transforms your design, you should be able to *prove* the transformation is correct, not just hope.
 
-- **ASIL-D** (highest): 50% power derate, 70% current derate
-- **ASIL-A** (lowest): 80% voltage derate
+skalp includes a SAT-based equivalence checker in the formal verification crate. The approach:
 
-Each component gets a risk assessment (Safe / Marginal / At Risk / Dangerous) based on actual operating conditions versus derated limits. Violations produce diagnostics that integrate with the LSP server — you see safety issues in your editor, not in a separate tool.
+1. Convert both designs (pre and post-transformation) to **And-Inverter Graphs** — a canonical bit-level representation where every operation is decomposed into 2-input ANDs and inversions
+2. Build a **miter circuit** — XOR corresponding outputs, OR all the XORs together. If the miter can ever output 1, the designs differ
+3. Encode to **CNF** using Tseitin transformation and hand it to a SAT solver
+4. **UNSAT** = equivalent (no input exists that produces different outputs). **SAT** = counterexample found
 
-The safety system also validates electrical constraints: Kirchhoff's current and voltage law compliance, floating input detection, short circuit identification, and missing protection checks.
+```
+Design A (pre-synthesis) ──→ AIG ──┐
+                                    ├──→ Miter (XOR outputs) ──→ CNF ──→ SAT solver
+Design B (post-synthesis) ──→ AIG ──┘
+                                                                          │
+                                                              UNSAT = equivalent
+                                                              SAT = counterexample
+```
+
+This covers two use cases: **combinational equivalence** (same outputs for all inputs) and **sequential equivalence** using bounded model checking (same register behavior up to K cycles, with register matching by name, width verification, reset value checking, and next-state function comparison).
+
+For large designs, FRAIG simplification (simulation + SAT sweeping) reduces the AIG before solving, and the SAT phase parallelizes across diff gates using rayon. The result either confirms equivalence or produces a concrete counterexample — actual input values that demonstrate the difference.
+
+---
+
+## Safety: Fault Injection and FMEDA
+
+This is where skalp does something I haven't seen in other HDLs.
+
+Traditional functional safety (ISO 26262) workflow: you design the hardware, hand it to a safety team, they manually build an FMEDA spreadsheet with assumed failure rates and estimated diagnostic coverage, and everyone hopes the numbers are right. DC values come from lookup tables, not measurement. It's slow, error-prone, and disconnected from the actual design.
+
+skalp integrates fault injection into the compiler. You declare safety goals as intent, the compiler decomposes them to gate-level fault campaigns, injects faults into every primitive, measures what gets detected, and generates the FMEDA automatically with *measured* diagnostic coverage. Not estimated — measured.
+
+### Fault Models
+
+The fault injection system supports 14+ fault types organized by failure mechanism:
+
+**Permanent faults** (manufacturing, wear-out): stuck-at-0, stuck-at-1, bridging, open
+
+**Transient faults** (radiation, EMI): single-event upset, bit flip, multi-bit upset
+
+**Timing faults** (margins, temperature): setup violation, hold violation, metastability
+
+**Power faults** (analog effects on digital): voltage dropout (IR drop), ground bounce, crosstalk glitch
+
+**Clock faults**: clock glitch (extra edge), clock stretch (PLL unlock)
+
+Predefined fault sets map to ASIL levels — ASIL-A gets stuck-at only, ASIL-D gets the full set including power and clock faults.
+
+### How DC Is Measured
+
+You define failure effects as temporal conditions on observable signals:
+
+```
+// "valve output corrupted" if it equals 0xFFFF
+effect valve_corrupted: valve_output == 0xFFFF (severity: S3)
+
+// "watchdog timeout ignored" if timeout fires but CPU stays alive
+effect timeout_ignored: @rose(timeout) && @stable(cpu_alive, 100)
+
+// "TMR disagreement" across redundant sensors
+effect sensor_disagree: @max_deviation(sensor_a, sensor_b, sensor_c) > 50
+```
+
+The condition language includes edge detection (`@rose`, `@fell`), stability checks (`@stable`), history (`@prev`, `@cycles_since`), arithmetic (`@abs_diff`, `@hamming_distance`), frequency analysis (`@pulse_count`, `@glitch_count`), and data integrity (`@crc32`, `@parity`).
+
+During a fault campaign, every primitive in the design gets each fault type injected. For each injection, the simulator runs the test scenario and checks whether the fault caused a failure effect and whether a safety mechanism detected it. The result:
+
+```
+DC = faults_detected / faults_causing_effect
+```
+
+This is actual measurement, not a table lookup. If your safety mechanism detects 9,900 out of 10,000 faults that cause the "valve corrupted" effect, your DC for that effect is 99.0%. The system computes SPFM (Single Point Fault Metric), LFM (Latent Fault Metric), and PMHF (Probabilistic Metric for Hardware Failures) directly from simulation data.
+
+### Common Cause Failure Analysis
+
+The CCF analyzer identifies groups of components that share failure causes — same clock domain, same reset, same power rail, physical proximity, same cell type — and applies beta factors to split FIT rates into independent and correlated components:
+
+```
+SharedClock:     β = 0.07 (7% of failures are correlated)
+SharedReset:     β = 0.05
+SharedPower:     β = 0.07
+PhysicalProximity: β = 0.01
+SharedDesign:    β = 0.02 (systematic — same cell type)
+SafetyMechanism: β = 1.0  (if SM fails, ALL protected logic is undetectable)
+```
+
+That last one matters most: when a safety mechanism itself fails, every component it protects becomes a single-point failure. The CCF analyzer identifies these SM-of-SM relationships automatically from the design hierarchy.
+
+### Auto-Generated FMEDA
+
+The output is a complete FMEDA with per-cell entries: base FIT rate (from tech library), failure distribution (safe/dangerous-detected/dangerous-undetected), measured DC (from fault injection), effective FIT breakdown (safe, SPF, residual, MPF), and the safety mechanism that provides detection. Gap analysis identifies exactly which primitives and fault types aren't meeting their ASIL targets, and how many additional detections are needed.
+
+The GPU fault simulator targets 10–20M fault simulations per second on Apple Silicon, making exhaustive campaigns over tens of thousands of primitives practical in seconds rather than hours.
+
+### Why This Matters
+
+This turns FMEDA from a late-stage manual audit into a design-time feedback loop. You change a safety mechanism, re-run the fault campaign, and see immediately whether DC improved or regressed. The safety case is built from evidence, not assumptions.
 
 ---
 
@@ -226,6 +315,8 @@ The philosophical difference from other modern HDLs (like Veryl or Chisel):
 | Intent preservation | First-class, through all IRs | None | None | None | None |
 | Type safety | Strong, with inference | Weak | Strong | Strong (Scala) | Moderate |
 | Width arithmetic | Const expressions (`clog2`) | Manual, error-prone | Manual | Scala expressions | Basic |
+| Equivalence checking | Built-in (AIG + SAT) | External tools | External tools | None | None |
+| Fault injection / FMEDA | Integrated, measured DC | None | None | None | None |
 | Syntax | Rust-inspired, expression-based | C-like, statement-based | Verbose | Scala DSL | Rust-inspired |
 | Output | SV, VHDL, Verilog, bitstream | Native | Native | Verilog | SystemVerilog |
 
