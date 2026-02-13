@@ -569,15 +569,27 @@ The analyzer finds clock domains, builds a timing graph from placement and routi
 
 ## What Makes This Different
 
-The philosophical difference from other modern HDLs (like Veryl or Chisel):
+Most modern HDL efforts improve the *language* while leaving the *toolchain* unchanged. skalp is a complete toolchain — language, compiler, synthesis, place & route, simulation, formal verification, and safety analysis — where each piece is designed to work with the others.
 
-**Veryl** is "SystemVerilog, but better" — evolutionary. It cleans up the syntax and adds conveniences, but transpiles to SystemVerilog and relies on its semantics. skalp is a new compilation target that *generates* SystemVerilog as one of several backends.
+**Veryl** is "SystemVerilog, but better" — evolutionary. It cleans up the syntax and adds conveniences, but transpiles to SystemVerilog and relies on external tools for everything after code generation: synthesis, simulation, formal, safety. skalp owns the full pipeline from source to bitstream.
 
-**Chisel** embeds hardware description in Scala. This gives you Scala's type system but also Scala's complexity and JVM dependency. skalp is a standalone language with its own type system designed specifically for hardware concerns (clock domains, bit widths, synthesis constraints).
+**Chisel** embeds hardware description in Scala. This gives you Scala's type system but also Scala's complexity and JVM dependency. It generates Verilog and hands off to vendor tools. There's no integrated equivalence checking, no fault injection, no safety analysis.
 
-**skalp's bet**: clock domain safety and intent preservation are worth a new language. Not a better syntax for an old language — a fundamentally different compilation model where the things that cause the worst bugs (CDC violations, lost intent, width mismatches) are structurally impossible.
+**SystemVerilog and VHDL** are the industry workhorses, but the toolchain is a patchwork: one vendor's synthesis, another's simulation, a third-party formal tool, manual FMEDA spreadsheets, separate CDC analysis at $50K/seat. Each tool has its own model of the design. Nothing is proven consistent across them.
+
+**skalp's difference** is that everything lives in one compilation model:
+
+- The **type system** catches CDC violations at compile time — not as a post-synthesis lint, but as a hard error before any hardware is generated
+- **Intent** is preserved through every IR, so optimization passes can check whether they're violating your constraints, not just minimizing area blindly
+- **Equivalence checking** runs between the simulator and synthesis backends, proving transformations correct — and in practice, this has been one of the most effective tools for finding bugs in both
+- **Fault injection** produces measured diagnostic coverage from actual simulation, not estimated DC from lookup tables — turning FMEDA from a manual audit into a design-time feedback loop
+- **Synthesis** maps through a word-level LIR to preserve compound cell opportunities, optimizes via AIG passes (FRAIG, retiming, rewrite), and supports both FPGA and ASIC targets with multi-corner timing
+- **Place and route** takes the gate netlist all the way to an iCE40 bitstream — analytical placement, PathFinder routing, timing analysis, IceStorm output — without leaving the toolchain
+- The **standard library** defines types (including all floating-point formats) as library code, not language primitives, using a trait system that makes every generic entity work with user-defined types
 
 skalp is also the only tooling ecosystem with first-class support for **Null Convention Logic** — asynchronous, clockless circuits using dual-rail encoding and threshold gates. No other HDL or synthesis tool provides integrated NCL support: from language-level dual-rail signal declaration through synthesis (C-element mapping, TH22 threshold gates) to place and route. If you're designing delay-insensitive or self-timed circuits, there is currently no other option with end-to-end tooling.
+
+The bet is that a unified toolchain catches entire classes of bugs that fall through the cracks of a fragmented one. When the same compiler that checks your clock domains also runs your fault campaigns and proves your synthesis correct, the pieces reinforce each other instead of operating in isolation.
 
 | | skalp | SystemVerilog | VHDL | Chisel | Veryl |
 |---|---|---|---|---|---|
