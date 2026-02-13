@@ -221,6 +221,8 @@ This covers two use cases: **combinational equivalence** (same outputs for all i
 
 For large designs, FRAIG simplification (simulation + SAT sweeping) reduces the AIG before solving, and the SAT phase parallelizes across diff gates using rayon. The result either confirms equivalence or produces a concrete counterexample — actual input values that demonstrate the difference.
 
+In practice, the equivalence checker has been one of the most valuable debugging tools in the project. Running EC between the simulator and synthesis backends caught a significant number of bugs in both — cases where the simulator computed the wrong value for an edge case, or where a synthesis optimization silently changed behavior. Having a formal proof that two representations agree (or a concrete counterexample when they don't) turns "it seems to work" into "it provably works."
+
 ---
 
 ## Safety: Fault Injection and FMEDA
