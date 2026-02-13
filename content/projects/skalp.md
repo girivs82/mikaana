@@ -351,6 +351,8 @@ entity Vec2Add<T> where T: Synthesizable {
 
 This is how the stdlib defines vector operations that work across `fp32`, `fp16`, fixed-point, or any user-defined numeric type. One implementation, any element type, fully specialized at compile time through monomorphization.
 
+The stdlib has no special privileges. You can implement the `FloatingPoint` trait for your own type — a custom 24-bit float for your ML accelerator, a posit format, a logarithmic number system — and every generic entity in the stdlib that uses `where T: FloatingPoint` works with it automatically. You can also replace stdlib implementations entirely: if the default `fp32_mul` doesn't meet your area or timing goals, write your own and use it instead. The stdlib is a starting point, not a ceiling.
+
 ### What's in the Standard Library
 
 **Floating-point** (fp16, fp32, fp64): full IEEE 754 arithmetic, comparison, classification. Transcendental functions — sin, cos, tan, atan2, ln, exp, pow, sqrt — implemented as Newton-Raphson iterations and Taylor series approximations, all synthesizable to RTL. Fast inverse sqrt uses the Quake III algorithm adapted for hardware.
