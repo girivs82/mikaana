@@ -55,6 +55,18 @@ pub type q1_15 = fixed<16, 15, true>
 
 This matters in power electronics where mixing Q8.8 coefficients with Q16.16 integrator values without proper scaling produces silent numerical errors that manifest as motor oscillation or battery overcharge. The type system makes the fixed-point format explicit at every signal declaration.
 
+**In SystemVerilog,** there are no type aliases for signals. You'd write:
+
+```systemverilog
+logic [15:0] v_bat_mv;   // millivolts? raw ADC? who knows
+logic [15:0] i_bat_ma;   // hope the comment is accurate
+logic [31:0] int_accum;  // Q16.16? Q8.24? check the comments
+```
+
+Comments are the only mechanism for encoding units and fixed-point format, and comments drift from reality. There's no `typedef` that carries semantic meaning through the type checker — `typedef logic [15:0] millivolts_t` creates a type alias, but SystemVerilog won't warn you if you assign a `millivolts_t` to an `milliamps_t`. It's the same 16 bits. skalp's type aliases are equally transparent to the compiler today, but they make code review catch errors that SystemVerilog hides in identical `logic [N:0]` declarations.
+
+The fixed-point situation is worse. SystemVerilog has no fixed-point type at all. You track the Q format in comments and manually insert shifts after every multiply. Forget one shift and your integrator value is off by 256x — a bug that compiles clean and only shows up when the motor oscillates.
+
 ---
 
 ## State Machines with Match Expressions
@@ -136,6 +148,37 @@ on(clk_fabric.rise) {
 
 Each pipeline stage captures its inputs on the clock edge and passes a `valid` flag forward. The "state" is implicit in which pipeline registers contain valid data. This is the natural pattern for data-flow architectures where you don't have a central controller — the data moves through the pipeline and each stage acts on what it receives.
 
+**In SystemVerilog,** state machines use `case` statements with `enum` types:
+
+```systemverilog
+typedef enum logic [3:0] {
+    INIT, WAIT_BMS, PRECHARGE, SOFT_START,
+    RUNNING, STANDBY, DERATE, FAULT, SHUTDOWN
+} module_state_t;
+
+always_ff @(posedge clk) begin
+    if (rst) state <= INIT;
+    else begin
+        case (state)
+            INIT: begin
+                master_enable <= 0;
+                if (enable && !any_fault) state <= WAIT_BMS;
+            end
+            WAIT_BMS: begin
+                if (!enable || any_fault) state <= FAULT;
+                else if (bms_connected) state <= PRECHARGE;
+            end
+            // ...
+            default: state <= INIT;  // what if you forget this?
+        endcase
+    end
+end
+```
+
+The structure is similar, but there are two key differences. First, SystemVerilog's `case` doesn't check exhaustiveness — if you add a tenth state to the enum but forget to add a case arm, the `default` branch handles it silently. In skalp, a `match` without full coverage is a compile error. You can't add `ModuleState::Emergency` without updating every `match` that operates on the state.
+
+Second, SystemVerilog's `default` branch is a trap. It looks safe — "catch everything else" — but it masks exactly the bugs you want to find: unhandled states. In safety-critical designs, reaching an unhandled state should be an explicit error, not a silent reset to `INIT`. skalp forces you to handle every case or explicitly write a catch-all, making the decision visible.
+
 ---
 
 ## Hierarchical Composition
@@ -186,6 +229,31 @@ DabBatteryController (top)
 
 About 15 leaf instances in the default configuration. Each is a self-contained entity with its own ports, testable in isolation. The composition pattern is always the same: `let name = Entity { ports }`, then access outputs with `name.output`.
 
+**In SystemVerilog,** module instantiation supports both positional and named port mapping:
+
+```systemverilog
+// Named (safe but verbose)
+protection_system u_protection (
+    .clk        (clk),
+    .rst        (rst),
+    .voltage    (v_bat_mv),
+    .current    (i_bat_ma),
+    .faults     (prot_faults),
+    .any_hard_fault (prot_hard)
+    // forgot .any_soft_fault — no error, it's unconnected
+);
+
+// Positional (compact but fragile)
+protection_system u_protection (
+    clk, rst, v_bat_mv, i_bat_ma, ...
+    // reorder a port in the module definition and this silently breaks
+);
+```
+
+SystemVerilog's named mapping (`.name(signal)`) is equivalent in safety to skalp's syntax. The real difference is what happens with unconnected ports. In SystemVerilog, an output port you forget to connect is silently unconnected — no warning by default. An input port left unconnected gets `z` (high impedance), which propagates as `x` through any logic it touches. Some lint tools catch this, but the language doesn't.
+
+In skalp, all ports must be connected at instantiation. An unconnected output requires an explicit `_` to acknowledge the omission. Forgetting a port is a compile error, not a latent `x` propagation bug.
+
 ---
 
 ## Structs for Configuration and Status Aggregation
@@ -232,6 +300,23 @@ faults = FaultFlags {
 
 The first five fields come from the protection subsystem, the last three from BMS and lockstep logic. Without structs, this would be 8 separate output ports. With structs, the consumer gets a single `faults` signal and accesses `faults.ov`, `faults.lockstep`, etc.
 
+**In SystemVerilog,** you can use `struct` types, but they're rarely used for module ports in practice:
+
+```systemverilog
+typedef struct packed {
+    logic ov, uv, oc, ot, desat, bms_fault, bms_timeout, lockstep;
+} fault_flags_t;
+
+// Works as a port, but...
+module dab_controller (
+    output fault_flags_t faults
+);
+```
+
+SystemVerilog structs exist, and `packed` structs can even be used as ports. But in practice, most teams avoid struct ports because of tool compatibility issues — some synthesis tools handle struct ports poorly, and mixing tools (one vendor's synthesis, another's simulation) can produce different struct layouts. The result is that most production SystemVerilog uses flat `logic` ports and passes around bit vectors, reassembling them with `assign` statements.
+
+skalp structs are always flattened to individual signals during MIR lowering, so they're guaranteed to synthesize correctly. The struct is a purely compile-time grouping mechanism — the synthesis tool never sees it.
+
 ---
 
 ## Generic Parameters for Test vs. Production
@@ -269,6 +354,28 @@ l0_l1_result = exec_l0_l1::<WORD_SIZE>(function_sel, data1, data2)
 ```
 
 Where `WORD_SIZE` is 32. The function body uses `W` for bit extractions and arithmetic widths. A future 64-bit version is a single constant change.
+
+**In SystemVerilog,** parameterized modules work similarly:
+
+```systemverilog
+module dab_controller #(
+    parameter SOFT_START_CYCLES = 1_000_000,
+    parameter BMS_TIMEOUT_CYCLES = 100_000_000
+) ( ... );
+```
+
+SystemVerilog parameters are actually quite capable here — the basic mechanism is the same. The difference is in what you can compute with them. skalp's const generics support full expression evaluation at compile time: `clog2(DEPTH + 1)`, complex type arithmetic, const functions. SystemVerilog's `$clog2` works but its constant expression evaluation is more limited and the `localparam` boilerplate adds up:
+
+```systemverilog
+localparam ADDR_WIDTH = $clog2(DEPTH);
+localparam PTR_WIDTH = $clog2(DEPTH + 1);  // one extra bit for full/empty
+logic [ADDR_WIDTH-1:0] wr_ptr;             // don't forget the -1
+logic [PTR_WIDTH-1:0] count;               // different -1 here
+```
+
+In skalp, `signal wr_ptr: nat[clog2(DEPTH)]` handles the width automatically — no `-1`, no `localparam`, no opportunity for off-by-one errors.
+
+The bigger difference is generic *functions*. SystemVerilog has parameterized modules but no parameterized functions. Karythra's `exec_l0_l1::<WORD_SIZE>(...)` is a compile-time specialized function. In SystemVerilog, you'd either write separate functions for each width or use a `generate` block inside a module — which means wrapping a function in a module just to parameterize it.
 
 ---
 
@@ -349,6 +456,36 @@ let inner_loop = PiController { setpoint: current_reference, feedback: i_bat, ..
 
 Outer voltage loop → clamp to BMS current limit → inner current loop. Two entity instantiations, one line of limiting logic between them.
 
+**In SystemVerilog,** the PI controller is roughly the same length, but several patterns don't translate:
+
+```systemverilog
+// No forward references — saturated must be defined BEFORE it's used
+wire saturated = (sum_raw > out_max) || (sum_raw < out_min);
+
+always_ff @(posedge clk) begin
+    if (rst) int_accum <= 0;
+    else if (enable && update) begin
+        // Anti-windup logic — same structure
+        if (!saturated || (saturated && sum_raw > out_max && error < 0) ||
+            (saturated && sum_raw < out_min && error > 0)) begin
+            int_accum <= int_accum + ((ki * error) >>> 8);
+        end
+    end
+end
+
+// Fixed-point: hope you remembered the shift
+assign prop_term = (kp * error) >>> 8;  // arithmetic right shift, not >>
+assign sum_raw = prop_term + int_accum;
+assign output = (sum_raw > out_max) ? out_max :
+                (sum_raw < out_min) ? out_min : sum_raw;
+```
+
+Three differences matter. First, SystemVerilog requires `wire`/`assign` declarations before use — no forward references. The `saturated` signal must be declared above the `always_ff` block where it's used. In skalp, combinational signals can appear in any order because they have no temporal dependency. This lets you group related logic together (sequential update near its combinational output) rather than ordering by dependency.
+
+Second, fixed-point arithmetic is entirely manual. `>>>` (arithmetic right shift) preserves the sign bit; `>>` (logical right shift) does not. Using `>>` instead of `>>>` for a signed Q16.16 value introduces a sign bug that compiles without warning. skalp's `fixed<32, 16, true>` type makes the signedness explicit in the type, and the `>> 8` operation knows whether to do arithmetic or logical shift based on the type.
+
+Third, the cascaded instantiation (`outer_loop.output` feeding `inner_loop.setpoint`) requires intermediate `wire` declarations in SystemVerilog. In skalp, `outer_loop.output` is a direct expression you can use inline.
+
 ---
 
 ## Protection: Hysteresis and Fault Latching
@@ -402,6 +539,10 @@ Once a fault fires, it latches and stays latched until explicitly cleared or unt
 
 The protection system composes five `ThresholdComparator` + `FaultLatch` pairs (OV, UV, OC, OT, desaturation) into a single `ProtectionSystem` entity with aggregate outputs. The top-level controller only sees `any_hard_fault` and `any_soft_fault` — the internal structure is encapsulated.
 
+**In SystemVerilog,** the comparator and latch logic is structurally identical — this is standard digital design. The difference is in composition. Instantiating five comparators and five latches in SystemVerilog means 10 module instantiations with positional or named ports. Wrapping them in a `protection_system` module means writing the module, its port list, internal wires for every inter-module connection, and the 10 instantiations. It works, but the boilerplate-to-logic ratio is high.
+
+The more interesting difference is that SystemVerilog has no mechanism for the `ProtectionThresholds` struct to flow through the hierarchy as a single port. You'd either pass individual threshold values (5 modules × 2 thresholds = 10 ports) or use a packed struct port (which some synthesis tools handle poorly). skalp's struct ports flatten at compile time, so the synthesis tool sees individual signals but the source code sees grouped configuration.
+
 ---
 
 ## Parallel Pre-Computation with Muxing
@@ -438,6 +579,23 @@ pub entity FunctionUnitL2<'clk> {
 
 L0-L1 is always on. L2 through L5 can be power-gated when the workload doesn't need them, with a 4-cycle wake-up penalty.
 
+**In SystemVerilog,** the parallel-compute-and-mux pattern is identical — this is just hardware design:
+
+```systemverilog
+wire [63:0] l0_l1_result = exec_l0_l1(function_sel, data1, data2);
+wire [63:0] l2_result    = exec_l2(function_sel, data1, data2);
+wire [63:0] l3_result    = exec_l3(function_sel, data1, data2);
+wire [63:0] l4_l5_result = exec_l4_l5(function_sel, data1, data2);
+
+assign fu_result = (function_sel < 18) ? l0_l1_result :
+                   (function_sel < 28) ? l2_result :
+                   (function_sel < 38) ? l3_result : l4_l5_result;
+```
+
+No real difference here. skalp's `if-else` expressions and SystemVerilog's ternary chains produce the same hardware. The skalp version is arguably more readable for deeply nested selections, but both are clear enough.
+
+The difference is the `#[power_domain]` annotation. SystemVerilog has no concept of power domains in the language — power intent is described in a separate UPF (Unified Power Format) file, maintained by a different team, using a different tool. In skalp, `#[power_domain(id = 1, wake_cycles = 4)]` lives on the entity itself, so the power architecture is visible in the source code and flows through to synthesis automatically.
+
 ---
 
 ## Zero-Cycle Morphing with Shadow Registers
@@ -469,6 +627,8 @@ route_sel = config_active[2:0]
 The configuration for the next quantum is written into `config_shadow` at any point during the current quantum. When `morph_trigger` fires, the active configuration swaps in one cycle — no pipeline flush, no reconfiguration delay. The function unit selection and routing change instantly.
 
 This is a general pattern for any hardware that needs to reconfigure without downtime: maintain a shadow copy, write it asynchronously, swap atomically on a trigger.
+
+**In SystemVerilog,** the shadow register pattern is identical. This is a pure hardware design pattern — skalp doesn't add anything over SystemVerilog here. Two registers, one loads continuously, one swaps on trigger. The RTL is the same in any language.
 
 ---
 
@@ -505,6 +665,10 @@ l2_result = exec_l2(function_sel, data1, data2)
 The synchronous version wraps this in pipeline stages with clock edges. The async version is purely combinational — the compiler handles dual-rail expansion and completion detection. The shared function units (`exec_l0_l1`, `exec_l2`, etc.) don't know or care whether they're being used in a clocked or clockless context. They're just combinational logic.
 
 This is a powerful pattern: write the computational core once as pure functions, then wrap it in either synchronous pipeline registers or NCL encode/decode boundaries depending on the target architecture.
+
+**In SystemVerilog,** this pattern is impossible. There is no async circuit support in SystemVerilog — the language assumes synchronous design throughout. If you wanted an NCL version of the same function unit, you'd hand-instantiate dual-rail signals, threshold gates, and completion detection in structural Verilog. The synchronous and async versions would share no code. Every change to the computational logic would require updating both implementations manually and hoping they stay in sync.
+
+This is perhaps the starkest difference between the two languages. skalp's `async entity` keyword and compiler-managed NCL expansion give you two implementations from one source. SystemVerilog gives you no path to async circuits at all.
 
 ---
 
@@ -568,6 +732,12 @@ on(clk.rise) {
 
 Ten consecutive mismatches trigger a lockstep fault. Single-cycle disagreements (noise, slight timing differences) are filtered out by the debounce counter. This is the kind of safety logic that looks simple but gets the details wrong in most first implementations — the saturating counter, the decrement-on-match, the threshold check.
 
+**In SystemVerilog,** safety is entirely outside the language. There are no safety annotations — ECC protection, diagnostic coverage, detection signals, and FMEDA classification are tracked in external documents (usually Excel spreadsheets). The connection between a module's RTL and its row in the FMEDA is maintained by convention: someone writes "this module has ECC" in a spreadsheet cell and hopes it stays true.
+
+skalp's `#[safety_mechanism]` and `#[detection_signal]` annotations are machine-readable. The fault injection system uses them to classify failure rates, identify detection signals, and generate FMEDA entries automatically. When you change the design, the safety analysis updates with it. In SystemVerilog, the design and the safety documentation are separate artifacts that drift apart.
+
+Similarly, `#[memory(style = register)]` is a synthesis hint that SystemVerilog handles with tool-specific pragmas (`(* ram_style = "distributed" *)` for Xilinx, `/* synthesis ramstyle = "logic" */` for Intel). Each vendor's pragma is different, and they're stringly-typed — a typo is silently ignored.
+
 ---
 
 ## Debug Infrastructure
@@ -593,6 +763,21 @@ r0_write_attempt = wr_enable && rd_addr == 0
 
 These annotations have zero cost in synthesis — they're stripped during compilation. But they make simulation debugging dramatically faster because the waveform viewer knows which signals matter and how to display them.
 
+**In SystemVerilog,** the equivalent debug infrastructure is scattered across multiple mechanisms:
+
+```systemverilog
+// Waveform grouping: done in the simulator GUI, not in the source
+// You manually drag signals into groups every time you open the waveform
+
+// Breakpoints: SystemVerilog assertions
+assert property (@(posedge clk) !(wr_enable && rd_addr == 0))
+    else $error("R0_WRITE_VIOLATION: Attempted write to protected r0 register");
+```
+
+SystemVerilog assertions (SVA) are powerful for the breakpoint use case — `assert property` can express complex temporal conditions. But waveform organization has no language support at all. Every engineer manually configures their waveform viewer, creating `.do` files or `.gtkw` scripts that aren't checked into version control and aren't portable between tools.
+
+skalp's `#[trace(group = "pipeline_s1")]` puts waveform organization in the source code. The debug setup travels with the design, works for every engineer, and doesn't depend on a specific simulator's UI.
+
 ---
 
 ## ADC Conversion Functions
@@ -613,18 +798,30 @@ Every ADC reading passes through a conversion function before being used in cont
 
 The alternative — scattering `adc_value * SCALE_FACTOR` throughout the code — leads to inconsistent scaling and makes it hard to change the ADC configuration. Centralizing conversions is standard practice in embedded software; the same discipline applies to HDL.
 
+**In SystemVerilog,** you'd use `function` for the same purpose:
+
+```systemverilog
+function automatic logic [15:0] adc_to_mv(input logic [11:0] adc, input logic [15:0] scale);
+    return adc * scale;
+endfunction
+```
+
+This works — SystemVerilog functions are synthesizable. The main difference is that skalp's typed return value (`-> MilliVolts`) makes the unit conversion visible in the signature. SystemVerilog's `logic [15:0]` return type tells you nothing about what the value represents. The function could return millivolts, raw ADC counts, or a temperature — the type is the same 16 bits.
+
+This is a case where both languages support the pattern, but skalp's type aliases add documentation value that SystemVerilog can't express.
+
 ---
 
 ## Lessons from Real Code
 
 A few observations from reading these projects:
 
-**The type system pulls its weight.** Type aliases, fixed-point types, and structs don't add hardware cost, but they catch entire categories of bugs that are invisible in SystemVerilog. When a PI controller takes `q8_8` coefficients and `q16_16` values, you can't accidentally swap them.
+**Not everything is better — and that's fine.** Shadow registers, parallel-compute-and-mux, pipeline valid flags — some patterns are pure hardware design and look the same in any language. skalp doesn't pretend to improve what doesn't need improving.
 
-**Composition scales.** Both projects use the same `let name = Entity { ports }` pattern from a single comparator up to a 15-instance hierarchy. The pattern doesn't change at scale — a protection system with five sub-instances looks the same as a top-level controller with four major subsystems.
+**Where skalp helps is in the gaps.** The patterns where SystemVerilog provides no support at all: async/NCL circuits from the same source, safety annotations that flow into FMEDA, power domain intent in the source code, waveform organization in the design files, forward references for grouping related logic, struct ports that reliably flatten during synthesis.
 
-**Generic parameters solve the simulation speed problem.** Production timing constants (100M cycles for a 1-second timeout) make simulation impractical. Parameterizing them and using reduced values in test wrappers is the difference between a 10-second test run and an overnight simulation.
+**Where skalp nudges is in the details.** Exhaustive match instead of `default`-masked `case`. Typed fixed-point instead of manual shift tracking. Mandatory port connections instead of silent `z`. Type aliases that make domain units visible. These aren't revolutionary individually, but they compound — each one prevents a class of bug that in SystemVerilog survives compilation and surfaces in hardware.
 
-**Match expressions make state machines readable.** Each state is self-contained in its match arm. You can read one arm and understand that state completely. The exhaustiveness check ensures you haven't forgotten a state. Compare this with SystemVerilog `case` statements where a missing `default` silently produces `x`.
+**The hardware design patterns are the same.** PI controllers, state machines, fault latches, protection hierarchies — these are domain patterns, not language patterns. A good power electronics engineer writes the same anti-windup logic in any language. What changes is how many opportunities the language gives you to get the *boilerplate* wrong while the *algorithm* is right.
 
-**Hardware safety patterns are just careful engineering.** Hysteresis comparators, debounced fault latches, anti-windup integrators, lockstep comparison — none of these are complex individually. The value is in getting them all right simultaneously in a design that composes them correctly. The language helps by making the structure visible and the composition explicit.
+**Composition and parameterization are where the biggest time savings come from.** Not from individual language features, but from the ease of wrapping a tested entity in a new context. Sangam's test wrapper — the same controller with shorter timeouts — is one line of generic parameters. Karythra's sync-to-async port — the same function units in an `async entity` — is a keyword change. These are the patterns that prevent copy-paste divergence in production codebases.
