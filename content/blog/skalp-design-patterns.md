@@ -1,7 +1,7 @@
 ---
 title: "Design Patterns in Real skalp Code"
 date: 2025-07-01
-summary: "What does production skalp code actually look like? A tour of design patterns from two real projects — a grid-tie inverter control system and a content-addressed processor — covering state machines, type-safe control loops, hierarchical composition, and more."
+summary: "What does production skalp code actually look like? A tour of design patterns from two real projects and the broader language specification — covering state machines, type-safe control loops, stream pipelines, clock domain safety, inline constraints, and more. Each pattern compared with SystemVerilog."
 tags: ["skalp", "hdl", "hardware", "design-patterns"]
 ShowToc: true
 ---
@@ -812,16 +812,355 @@ This is a case where both languages support the pattern, but skalp's type aliase
 
 ---
 
-## Lessons from Real Code
+## Beyond These Projects: Language-Level Patterns
 
-A few observations from reading these projects:
+The patterns above come from two real projects. But the skalp language specification includes features that neither sangam nor karythra exercises yet — features designed for the broader problem space of hardware design. These are patterns you'd reach for as your designs grow.
+
+---
+
+## Stream Types with Implicit Handshaking
+
+When hardware modules communicate, the most common pattern is ready/valid handshaking: a producer asserts `valid` when data is available, a consumer asserts `ready` when it can accept data, and a transfer occurs when both are high. In any non-trivial design, you write this protocol dozens of times.
+
+skalp makes streams a first-class type:
+
+```
+entity StreamProcessor {
+    in data: stream<bit[32]>
+    out result: stream<bit[32]>
+}
+```
+
+A `stream<bit[32]>` is not just a 32-bit signal. It carries implicit `valid` and `ready` signals, and the compiler enforces the handshaking protocol. You can't read from a stream without acknowledging the handshake. You can't write to a stream without checking backpressure.
+
+Stream composition uses the pipeline operator:
+
+```
+flow {
+    pixels
+    |> rgb_to_gray()
+    |> gaussian_blur()
+    |> sobel_edges()
+    => processed
+}
+```
+
+Each `|>` inserts a pipeline stage with automatic register insertion and handshaking. The compiler manages ready/valid propagation, backpressure, and bubble collapsing. You describe the dataflow; the compiler generates the pipeline control.
+
+**In SystemVerilog,** ready/valid handshaking is manual every time:
+
+```systemverilog
+module stream_processor (
+    input  logic        clk,
+    input  logic [31:0] in_data,
+    input  logic        in_valid,
+    output logic        in_ready,
+    output logic [31:0] out_data,
+    output logic        out_valid,
+    input  logic        out_ready
+);
+```
+
+Six signals for what skalp expresses in two stream ports. And this is just the port list — the handshaking logic (skid buffers, pipeline bubbles, backpressure propagation) is another 50-100 lines per stage. A 5-stage pipeline requires writing the same handshaking FSM five times, with subtle differences at each stage boundary. Get one wrong and the pipeline deadlocks under backpressure — a bug that only appears under specific traffic patterns.
+
+There's no mechanism to compose pipeline stages declaratively. Each stage is a separate module with explicit wiring.
+
+---
+
+## Protocol Definitions with Direction Flipping
+
+Hardware interfaces have a direction problem. An AXI stream master has `data` and `valid` as outputs and `ready` as input. The slave has the same signals but with flipped directions. In any bus protocol, you need both perspectives.
+
+skalp defines protocols once and flips them with `~`:
+
+```
+protocol AXIStream {
+    out data: bit[32],
+    out valid: bit,
+    in ready: bit,
+    out last: bit
+}
+
+entity Producer {
+    port axi: AXIStream      // data/valid/last are outputs, ready is input
+}
+
+entity Consumer {
+    port axi: ~AXIStream     // flipped: data/valid/last are inputs, ready is output
+}
+```
+
+The `~` operator reverses every direction in the protocol. One definition, two perspectives, compile-time checked. If you add a signal to the protocol, both producer and consumer must handle it.
+
+**In SystemVerilog,** the closest mechanism is `interface` with `modport`:
+
+```systemverilog
+interface axi_stream_if;
+    logic [31:0] data;
+    logic        valid;
+    logic        ready;
+    logic        last;
+
+    modport master (output data, output valid, input  ready, output last);
+    modport slave  (input  data, input  valid, output ready, input  last);
+endinterface
+```
+
+You define the same signals twice — once for `master`, once for `slave` — and manually ensure the directions are consistent. Add a signal to the interface but forget to add it to one modport? No error. Change a direction in `master` but not `slave`? No error. The two modports are independent declarations that happen to reference the same signals. Nothing enforces that they're actually complementary.
+
+skalp's `~` is a mathematical operation on the protocol — the flipped version is derived, not manually declared.
+
+---
+
+## Clock Domains as Lifetimes
+
+Clock domain crossings (CDC) are the single most common source of hard-to-find bugs in multi-clock designs. A signal generated in one clock domain used directly in another creates a metastability window that manifests as random, intermittent failures — the kind that pass simulation but fail in silicon.
+
+skalp tracks clock domains in the type system using lifetime annotations:
+
+```
+signal data: bit<'fast>[32]     // in the 'fast clock domain
+signal synced: bit<'slow>[32]   // in the 'slow clock domain
+
+// Compile error: clock domain mismatch
+synced = data
+
+// Correct: explicit synchronizer
+synced = synchronize(data)
+```
+
+The `'fast` and `'slow` are clock domain lifetimes. Assigning a signal from one domain to another without an explicit synchronizer is a compile-time error. You can't accidentally create a CDC violation — the type system catches it before simulation.
+
+**In SystemVerilog,** there is no concept of clock domains in the type system:
+
+```systemverilog
+// Both are just logic — no domain information
+logic [31:0] fast_data;   // clocked by clk_fast
+logic [31:0] slow_data;   // clocked by clk_slow
+
+// No error — metastability bug compiles clean
+assign slow_data = fast_data;
+```
+
+CDC violations are caught by external lint tools (Spyglass, Meridian CDC) that analyze the design post-compilation. These tools are expensive, slow (hours on large designs), and run late in the design cycle — often after the bug has propagated into dependent logic. skalp moves CDC checking to compile time, where the fix is a one-line change instead of a multi-week debug effort.
+
+---
+
+## Requirement Declarations with Verification Traceability
+
+Safety-critical designs (automotive, aerospace, medical) require a traceability matrix: every requirement must map to a design element, every design element must map to a verification artifact. This matrix is typically maintained in spreadsheets or requirements management tools (DOORS) that are completely disconnected from the RTL source.
+
+skalp makes requirements a language construct:
+
+```
+requirement REQ_PERF_001 {
+    id: "SYS-PERF-001",
+    title: "Processing Throughput",
+    description: "System shall process 1M packets/sec at 200MHz",
+    category: performance,
+    verification: [simulation, fpga_prototype]
+}
+
+entity PacketProcessor {
+    // ...
+} satisfies [REQ_PERF_001] with evidence {
+    throughput_achieved: 1.1M_pps,
+    verification_report: "reports/throughput.html"
+}
+```
+
+The `satisfies` clause creates a machine-readable link between the design and its requirements. The compiler can generate a traceability matrix automatically, flag unmet requirements, and detect requirements that no entity satisfies.
+
+**In SystemVerilog,** requirements exist in comments:
+
+```systemverilog
+// Requirement: SYS-PERF-001 - 1M packets/sec at 200MHz
+// See DOORS ID 12345
+module packet_processor ( ... );
+```
+
+The comment drifts from the DOORS entry the moment someone edits one but not the other. There is no tooling that connects the RTL to the requirement database — auditors manually verify traceability by comparing documents, which is error-prone and time-consuming for ISO 26262 or DO-254 certification.
+
+---
+
+## Inline Physical Constraints
+
+Every FPGA design has a constraints file — PCF for iCE40, XDC for Xilinx, QSF for Intel. These files specify pin assignments, I/O standards, timing constraints, and clock definitions. They're maintained separately from the RTL and reference signal names by string. Rename a port in the RTL, forget to update the constraints file, and the build fails (best case) or silently assigns the wrong pin (worst case).
+
+skalp puts physical constraints on the ports they describe:
+
+```
+entity LedBlinker {
+    in clk: clock @ {
+        pin: "A1",
+        io_standard: "LVCMOS33",
+        frequency: 100MHz
+    }
+
+    in rst: reset @ {
+        pin: "B2",
+        io_standard: "LVCMOS33",
+        pull: up,
+        schmitt: true
+    }
+
+    out leds: bit[8] @ {
+        pins: ["C1", "C2", "C3", "C4", "D1", "D2", "D3", "D4"],
+        io_standard: "LVCMOS33",
+        drive: 8mA,
+        slew: fast
+    }
+}
+```
+
+The `@` syntax attaches constraints directly to ports. When you rename a port, the constraints come with it. When you change a pin assignment, it's in the same file as the logic. The compiler generates the target-specific constraints file (PCF, XDC, QSF) during synthesis.
+
+**In SystemVerilog,** constraints live in separate files:
+
+```
+# Xilinx XDC
+set_property PACKAGE_PIN A1 [get_ports clk]
+set_property IOSTANDARD LVCMOS33 [get_ports clk]
+set_property PACKAGE_PIN B2 [get_ports rst]
+set_property IOSTANDARD LVCMOS33 [get_ports rst]
+# ... 20 more lines for 8 LEDs
+```
+
+These files reference ports by string name. A rename in the RTL requires a find-and-replace in the constraints file. For a 200-pin design, the constraints file is hundreds of lines maintained by a different engineer than the one writing the RTL. Mismatches are caught only at implementation time, deep in the vendor tool's place-and-route phase.
+
+---
+
+## Distinct Types (Newtype Pattern)
+
+Type aliases (covered earlier) make code readable but don't prevent mixing. A `MilliVolts` and a `MilliAmps` are both `nat[16]` — you can add them without error. skalp also supports distinct types for stronger safety:
+
+```
+distinct type Celsius = int[16]
+distinct type Fahrenheit = int[16]
+
+signal temp_c: Celsius
+signal temp_f: Fahrenheit
+
+// Compile error: cannot assign Fahrenheit to Celsius
+temp_c = temp_f
+
+// Must explicitly convert
+temp_c = celsius_from(temp_f)
+```
+
+A `distinct type` creates a new type that is not interchangeable with its underlying representation. The compiler rejects implicit mixing — you must go through a conversion function. This is the hardware equivalent of the newtype pattern in Rust or Haskell.
+
+This is particularly useful for physical units in mixed-signal designs, hash types in cryptographic hardware, and address spaces in memory controllers (physical vs. virtual addresses, byte vs. word addresses).
+
+**In SystemVerilog,** `typedef` creates an alias, not a distinct type:
+
+```systemverilog
+typedef logic [15:0] celsius_t;
+typedef logic [15:0] fahrenheit_t;
+
+celsius_t temp_c;
+fahrenheit_t temp_f;
+
+// No error — both are logic [15:0]
+assign temp_c = temp_f;
+```
+
+SystemVerilog's type system has no mechanism for distinct types. Every `typedef` is transparent — the compiler sees through it to the underlying `logic` type. Unit confusion bugs compile clean.
+
+---
+
+## Package Management
+
+A hardware design with dependencies on IP libraries, utility packages, and third-party cores currently manages those dependencies by... copying files into the repository. Or using git submodules. Or maintaining a `filelist.f` that references absolute paths on someone's workstation.
+
+skalp has Cargo-style package management:
+
+```toml
+# skalp.toml
+[package]
+name = "my-design"
+version = "1.0.0"
+
+[dependencies]
+skalp-numeric = "2.0"
+skalp-crypto = { git = "https://github.com/org/crypto-ip" }
+local-utils = { path = "../utils" }
+
+[features]
+default = ["fft"]
+fft = []
+```
+
+Dependencies are resolved, locked to specific versions, and built automatically. Feature flags enable conditional compilation — include the FFT module only when the `fft` feature is enabled. A lockfile ensures reproducible builds.
+
+**In SystemVerilog,** there is no package manager:
+
+```
+# filelist.f — the "package manager"
++incdir+/home/john/ip_libs/axi/rtl
+/home/john/ip_libs/axi/rtl/axi_pkg.sv
+/home/john/ip_libs/axi/rtl/axi_master.sv
+/shared/nfs/old_server/utils/fifo.sv
+# TODO: john left the company, need to find where this IP moved
+```
+
+FuseSoC and similar tools attempt to fill this gap, but they're external to the language and have limited adoption. skalp makes dependency management a first-class concern, which matters increasingly as hardware designs grow in complexity and reuse.
+
+---
+
+## Integrated Timing Constraints
+
+Timing constraints — setup time, hold time, clock-to-output delay, false paths, multicycle paths — are specified in SDC (Synopsys Design Constraints) files that are separate from the RTL. Like physical constraints, they reference signals by string name and are maintained independently.
+
+skalp integrates timing constraints with the design:
+
+```
+entity Interface {
+    in data: bit[32] @ clk {
+        setup_time: 2ns,
+        hold_time: 0.5ns,
+        input_delay: 1ns
+    }
+
+    out result: bit[32] @ clk {
+        clock_to_out: max 3ns,
+        output_delay: 1ns
+    }
+}
+
+// False path declaration
+path(async_signal -> synced_signal) {
+    false_path: true,
+    reason: "CDC through double-sync"
+}
+```
+
+Timing intent lives with the signals it constrains. The compiler generates SDC/XDC timing constraints during synthesis. The `reason` field documents why a false path exists — something SDC files support only as comments that nobody reads.
+
+**In SystemVerilog,** timing is specified in SDC:
+
+```tcl
+set_input_delay -clock clk -max 1.0 [get_ports data]
+set_output_delay -clock clk -max 1.0 [get_ports result]
+set_false_path -from [get_cells async_reg] -to [get_cells sync_reg]
+```
+
+SDC is a Tcl-based scripting language. Timing constraints are programs that query the design netlist and apply constraints to matching objects. This is powerful but error-prone — a `get_cells` query that matches nothing fails silently, and the constraint simply doesn't apply. skalp's inline constraints are checked at compile time: if the signal doesn't exist, the build fails.
+
+---
+
+## Lessons from Real Code and Language Design
+
+A few observations from both the real projects and the language specification:
 
 **Not everything is better — and that's fine.** Shadow registers, parallel-compute-and-mux, pipeline valid flags — some patterns are pure hardware design and look the same in any language. skalp doesn't pretend to improve what doesn't need improving.
 
-**Where skalp helps is in the gaps.** The patterns where SystemVerilog provides no support at all: async/NCL circuits from the same source, safety annotations that flow into FMEDA, power domain intent in the source code, waveform organization in the design files, forward references for grouping related logic, struct ports that reliably flatten during synthesis.
+**Where skalp helps most is in the gaps between tools.** Traditional hardware design scatters related information across a half-dozen file formats: RTL in SystemVerilog, timing in SDC, power in UPF, constraints in XDC, requirements in DOORS, safety analysis in spreadsheets. Each format has its own language, its own tool, and its own failure modes. skalp's approach is to bring these into the source language — not because a single file is inherently better, but because co-location means the compiler can cross-check them. Rename a port and the pin constraint comes with it. Add a safety mechanism and the FMEDA updates. Change a clock domain and CDC violations surface at compile time.
 
-**Where skalp nudges is in the details.** Exhaustive match instead of `default`-masked `case`. Typed fixed-point instead of manual shift tracking. Mandatory port connections instead of silent `z`. Type aliases that make domain units visible. These aren't revolutionary individually, but they compound — each one prevents a class of bug that in SystemVerilog survives compilation and surfaces in hardware.
+**Where skalp nudges is in the details.** Exhaustive match instead of `default`-masked `case`. Typed fixed-point instead of manual shift tracking. Distinct types instead of transparent aliases. Mandatory port connections instead of silent `z`. Stream types instead of manual handshaking. These aren't revolutionary individually, but they compound — each one prevents a class of bug that in SystemVerilog survives compilation and surfaces in hardware.
 
 **The hardware design patterns are the same.** PI controllers, state machines, fault latches, protection hierarchies — these are domain patterns, not language patterns. A good power electronics engineer writes the same anti-windup logic in any language. What changes is how many opportunities the language gives you to get the *boilerplate* wrong while the *algorithm* is right.
 
-**Composition and parameterization are where the biggest time savings come from.** Not from individual language features, but from the ease of wrapping a tested entity in a new context. Sangam's test wrapper — the same controller with shorter timeouts — is one line of generic parameters. Karythra's sync-to-async port — the same function units in an `async entity` — is a keyword change. These are the patterns that prevent copy-paste divergence in production codebases.
+**Modern software engineering practices apply to hardware.** Package management, strong type systems, compile-time evaluation, protocol types with direction flipping — these are solved problems in software. Hardware has been slow to adopt them because the existing tools work (in the sense that chips get taped out) and changing languages is expensive. But the cost of not having them shows up in debug time, in certification effort, in the engineer-hours spent maintaining traceability spreadsheets that don't match the RTL.
+
+**Composition and parameterization are where the biggest time savings come from.** Not from individual language features, but from the ease of wrapping a tested entity in a new context. Sangam's test wrapper — the same controller with shorter timeouts — is one line of generic parameters. Karythra's sync-to-async port — the same function units in an `async entity` — is a keyword change. Stream pipelines composed with `|>`. These are the patterns that prevent copy-paste divergence in production codebases.
