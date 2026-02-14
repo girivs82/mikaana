@@ -19,7 +19,7 @@ This chapter covers two categories of annotations:
 
 **Safety annotations** that feed into fault analysis:
 
-- `#[safety_mechanism]` — marks an entity as a safety mechanism with type and coverage metadata
+- `#[safety_mechanism]` — marks an entity as a safety mechanism with type metadata (diagnostic coverage is calculated via fault injection)
 - `#[detection_signal]` — marks an output that detects faults, telling the fault injection system what to observe
 - `#[retention]` — marks state that must persist across clock cycles, flagging it for retention analysis
 
@@ -58,10 +58,11 @@ Create a file called `src/tmr_counter.sk`:
 // three copies raises tmr_error for one cycle.
 //
 // The #[safety_mechanism] annotation tells the compiler that this
-// entity exists to protect against faults. The type and coverage
-// fields feed into automated FMEDA generation.
+// entity exists to protect against faults. The type field feeds
+// into automated FMEDA generation. Diagnostic coverage is
+// calculated automatically via fault injection — not specified here.
 
-#[safety_mechanism(type = tmr, coverage = 99.9)]
+#[safety_mechanism(type = tmr)]
 entity TmrCounter<const WIDTH: nat = 8> {
     in clk: clock,
     in rst: reset,
@@ -127,13 +128,12 @@ impl TmrCounter {
 
 ### How the Annotations Work
 
-**`#[safety_mechanism(type = tmr, coverage = 99.9)]`** is attached to the entity declaration. It tells the compiler three things:
+**`#[safety_mechanism(type = tmr)]`** is attached to the entity declaration. It tells the compiler two things:
 
 1. This entity is a safety mechanism — it exists to protect against hardware faults.
 2. The protection type is TMR — triple modular redundancy with majority voting.
-3. The diagnostic coverage is 99.9% — meaning 99.9% of single-point faults in the protected logic are either masked or detected.
 
-The compiler uses this metadata during FMEDA generation. When you run `skalp fmeda`, the tool walks the design hierarchy, finds every entity with `#[safety_mechanism]`, and builds a fault classification table. Entities without safety annotations are classified as unprotected. The coverage percentages feed into the overall safety metrics required by standards like ISO 26262 (automotive) and IEC 61508 (industrial).
+You do not specify diagnostic coverage in the annotation. Instead, the compiler calculates it automatically using fault injection (FI). When you run `skalp fault-inject`, the tool injects faults into the protected logic and observes whether the `#[detection_signal]` outputs detect them. The measured detection rate is the diagnostic coverage. When you run `skalp fmeda`, the tool walks the design hierarchy, finds every entity with `#[safety_mechanism]`, incorporates the FI-derived coverage, and builds a fault classification table. Entities without safety annotations are classified as unprotected. The coverage numbers feed into the overall safety metrics required by standards like ISO 26262 (automotive) and IEC 61508 (industrial).
 
 **`#[detection_signal]`** is attached to the `tmr_error` output port. It tells the fault injection framework: "when you inject a fault into this entity, check this output to determine whether the fault was detected." Without this annotation, the framework would inject faults but have no way to measure detection coverage automatically. You could still observe any signal manually, but automation requires knowing which signals are detection outputs.
 
@@ -234,7 +234,7 @@ Update `src/uart_tx.sk` to add TMR protection to the state register:
 // the active state on every cycle. Any disagreement raises
 // fsm_error for external monitoring.
 
-#[safety_mechanism(type = tmr, coverage = 99.9)]
+#[safety_mechanism(type = tmr)]
 entity UartTx<
     const CLK_FREQ_HZ: nat = 50_000_000,
     const BAUD_RATE: nat = 115200,
@@ -734,7 +734,7 @@ impl UartTop {
 
 Let us step back and see the full picture of what the annotations provide:
 
-**Safety mechanism chain.** `UartTx` is marked `#[safety_mechanism(type = tmr)]`. Its `fsm_error` output is marked `#[detection_signal]`. When you run `skalp fmeda`, the tool knows: "UartTx is a TMR-protected entity. Faults in the state register are masked by the voter. Detection is reported on `fsm_error`. Coverage is 99.9%." This feeds directly into an ISO 26262 safety case.
+**Safety mechanism chain.** `UartTx` is marked `#[safety_mechanism(type = tmr)]`. Its `fsm_error` output is marked `#[detection_signal]`. When you run `skalp fmeda`, the tool knows: "UartTx is a TMR-protected entity. Faults in the state register are masked by the voter. Detection is reported on `fsm_error`." The diagnostic coverage is calculated automatically by the fault injection system — you never specify it manually. This feeds directly into an ISO 26262 safety case.
 
 **Error detection outputs.** The UART top-level exports four detection signals: `tx_fsm_error`, `rx_parity_error`, `rx_frame_error`, and `rx_overrun`. A system-level safety monitor can observe these and take corrective action — reset the UART, log the fault, or escalate to a higher-level safety controller. Each is marked `#[detection_signal]` so the fault injection framework can automate coverage measurement.
 
@@ -811,7 +811,7 @@ skalp fault-inject --entity UartTx \
     --runs 1000
 ```
 
-This flips a random bit in `state_a` at a random cycle across 1000 simulation runs. For each run, the tool checks whether `fsm_error` (the `#[detection_signal]`) went high. With TMR, the expected detection rate is 99.9% or higher, matching the `coverage` declaration. If the measured coverage falls below the declared coverage, the tool reports a mismatch.
+This flips a random bit in `state_a` at a random cycle across 1000 simulation runs. For each run, the tool checks whether `fsm_error` (the `#[detection_signal]`) went high. The measured detection rate across all runs is the diagnostic coverage for this safety mechanism. This FI-derived coverage is what `skalp fmeda` uses when generating the FMEDA report — no manual coverage numbers needed.
 
 ---
 
@@ -819,7 +819,7 @@ This flips a random bit in `state_a` at a random cycle across 1000 simulation ru
 
 | Concept | Syntax | Example |
 |---------|--------|---------|
-| Safety mechanism | `#[safety_mechanism(type = T, coverage = N)]` | `#[safety_mechanism(type = tmr, coverage = 99.9)]` |
+| Safety mechanism | `#[safety_mechanism(type = T)]` | `#[safety_mechanism(type = tmr)]` |
 | Detection signal | `#[detection_signal]` | `#[detection_signal] out error: bit` |
 | Retention | `#[retention]` | `#[retention] signal cal_value: bit[16]` |
 | Trace group | `#[trace(group = "G")]` | `#[trace(group = "pipeline")]` |
