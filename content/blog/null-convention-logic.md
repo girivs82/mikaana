@@ -324,6 +324,36 @@ For FPGAs specifically, a TH22 maps to a single LUT4 plus a feedback path throug
 
 The full flow — AIG optimization, placement, PathFinder routing, and bitstream generation — works with NCL designs. The synthesis engine treats threshold gates as standard cells with feedback; the placer and router don't need to know they're NCL.
 
+### Async Static Timing Analysis
+
+Synchronous STA answers one question: does every combinational path settle before the next clock edge? Async circuits don't have a clock edge, so what does timing analysis even mean?
+
+It turns out STA is *more* important for boundary-only NCL, not less. The correctness of boundary-only NCL depends on the assumption that combinational logic within a stage settles before the completion signal propagates back. But not all paths through a stage take the same amount of time. Consider a stage with two parallel computations that fork from the same input:
+
+```
+            ┌─── fast path (2ns) ──→ output_a ──→ completion
+input ──────┤
+            └─── slow path (8ns) ──→ output_b ──→ completion
+```
+
+The fast path's output arrives at the completion detector in 2ns. If the completion detector fires as soon as `output_a` is valid, the downstream stage could latch `output_a` while `output_b` is still settling — a race condition.
+
+In full NCL, this can't happen: every gate along both paths is a threshold gate with hysteresis, so data propagates in lockstep. But in boundary-only NCL, the combinational logic between decode and encode has no such guarantee.
+
+skalp solves this with **async STA**: after placement and routing, the timing analyzer computes the worst-case delay through every combinational path from decode to encode within each pipeline stage. For each fork point — where a signal fans out to multiple paths of different lengths — the tool inserts **matched delays** on the ready/acknowledgment signals of faster paths, ensuring the completion detector doesn't fire until the slowest path has settled.
+
+```
+            ┌─── fast path (2ns) ──→ delay(6ns) ──→ output_a ──→ completion
+input ──────┤
+            └─── slow path (8ns) ──────────────────→ output_b ──→ completion
+```
+
+The delay is computed from STA results: `delay = worst_path_delay - this_path_delay`. The inserted delay element can be a chain of buffers, a dedicated delay cell, or (on FPGAs) a chain of LUTs configured as pass-throughs. The exact implementation depends on the target.
+
+This is the key insight that makes boundary-only NCL practical on real hardware: you get the area efficiency of standard combinational logic (no 2x wiring overhead internally) while using STA results to close the timing gap that full NCL handles structurally. The circuit is still self-timed at the pipeline level — completion detection and handshaking drive the data flow — but within each stage, STA-derived delays ensure correctness without requiring full delay-insensitivity.
+
+The async STA also reports the achievable throughput of each pipeline stage (inverse of the slowest path plus completion detection overhead), identifies bottleneck stages, and flags paths where the delay mismatch is large enough to warrant splitting the stage with an additional `barrier`.
+
 ### Safety Integration
 
 NCL elements carry FIT (Failure In Time) rates in the gate netlist, flowing through to FMEDA analysis. The fault injection system can inject faults into threshold gates and measure whether the dual-rail encoding detects them — quantifying the inherent diagnostic coverage of NCL designs rather than assuming it.
