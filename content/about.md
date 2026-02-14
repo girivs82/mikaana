@@ -8,8 +8,8 @@ ShowBreadCrumbs: false
 
 Hi, I'm Giri.
 
-I build things with video and software. Currently working on the **skalp** ecosystem — a set of tools for HLS streaming — and writing a novel on the side.
+I design hardware and write software. Currently building [**skalp**](/projects/skalp/) — a hardware description language written in Rust that sits between RTL and HLS, with compile-time clock domain safety and progressive refinement. Also writing a novel on the side.
 
-This site is where I share projects, blog posts, and whatever else catches my attention.
+This site is where I share [projects](/projects/), [blog posts](/blog/), and a [tutorial](/tutorial/) on learning skalp by building a UART peripheral from scratch.
 
 You can find me on [GitHub](https://github.com/girivs82).
