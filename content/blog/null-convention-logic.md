@@ -247,24 +247,82 @@ impl NclPipeline {
 }
 ```
 
-### The Compilation
+### Boundary-Only NCL: The Practical Middle Ground
 
-The compiler uses a **boundary-only** expansion by default: inputs are decoded from dual-rail, internal logic runs as standard combinational gates, and outputs are re-encoded to dual-rail with completion detection on the primary outputs. This dramatically reduces gate count compared to full dual-rail expansion of every internal signal.
+The textbook version of NCL converts *every* signal to dual-rail and *every* gate to threshold logic. For an 8-bit adder, that means 16 input wires, 16 output wires, and every internal carry and sum wire doubled — plus threshold gates everywhere. The area overhead is real and it's the main reason NCL stays in academia.
 
-For designs that need complete delay-insensitivity internally (safety-critical, radiation-hardened), full dual-rail expansion is available as an option — every internal signal becomes a dual-rail pair, every operation expands to threshold gate combinations.
+skalp takes a different approach by default: **boundary-only NCL**. The idea is that you only need dual-rail encoding at the *interfaces* between pipeline stages — the points where the NCL handshaking protocol actually operates. Inside a pipeline stage, the logic is purely combinational: it doesn't matter whether it's built from threshold gates or standard gates, because within a single stage, all inputs arrive (via the dual-rail protocol) before any outputs are consumed (via completion detection).
 
-The NCL expansion pass then runs six optimization passes:
+The compilation works like this:
+
+```
+Dual-rail inputs → NclDecode → Standard combinational logic → NclEncode → Dual-rail outputs
+                                                                              ↓
+                                                                    Completion detection
+```
+
+1. **NclDecode** at the inputs: converts each dual-rail pair `(t, f)` back to a single-rail bit. The true rail *is* the data — when `t=1, f=0`, the bit is 1; when `t=0, f=1`, the bit is 0. During the NULL phase, both rails are 0, and the decoder holds its previous value (or outputs 0, depending on configuration).
+
+2. **Standard logic** in the middle: the adder, multiplier, mux — whatever the entity computes — runs as ordinary combinational gates. AND gates, OR gates, XOR gates. No dual-rail, no threshold gates. This is the same logic you'd synthesize for a synchronous design.
+
+3. **NclEncode** at the outputs: converts single-rail bits back to dual-rail pairs. A `1` becomes `(t=1, f=0)`, a `0` becomes `(t=0, f=1)`.
+
+4. **Completion detection** on the outputs: monitors all output dual-rail pairs. When every pair has left the NULL state (at least one rail is high), the stage signals completion.
+
+**Why does this still work as async?** The NCL protocol's correctness depends on two properties: (a) outputs don't transition until *all* inputs have arrived, and (b) outputs return to NULL before accepting new inputs. Boundary-only encoding preserves both:
+
+- The upstream stage's completion detector ensures all inputs have transitioned to valid DATA before the downstream stage's decoder sees them. The combinational logic between decode and encode is just... logic. It settles in some bounded time, and the completion detector on the output side doesn't fire until all outputs are valid.
+- During the NULL phase, the decoder sees NULL on all inputs, the combinational logic settles to whatever state those decoded values produce, and the encoder reflects that as NULL on the outputs.
+
+The tradeoff: boundary-only NCL is **quasi-delay-insensitive** rather than fully delay-insensitive. It assumes that the combinational logic within a stage settles before the next DATA wavefront arrives. This is a weaker guarantee than full NCL, where every gate individually respects the protocol. But in practice, the handshaking between stages provides enough margin — the completion detector on the previous stage won't release the next wavefront until all outputs are valid, and the combinational settling time is bounded.
+
+The gate count reduction is dramatic. An 8-bit adder in full NCL needs ~200 threshold gates. In boundary-only mode, it needs the same ~20 standard gates as a synchronous adder, plus ~20 gates for encode/decode/completion at the boundaries. That's roughly 2x instead of 10x.
+
+For designs that *need* full delay-insensitivity — radiation-hardened, ultra-high-reliability, or circuits where you genuinely can't bound combinational delay — skalp supports full dual-rail expansion as a compile-time option. Every internal signal becomes a dual-rail pair, every gate becomes threshold logic. You pay the area cost, but you get the strongest timing guarantee.
+
+### The NCL Optimization Pipeline
+
+After expansion (boundary or full), the compiler runs six optimization passes:
 
 1. **Constant propagation** — fold known DATA values through gates
-2. **Idempotent collapse** — `TH12(a, a) → a` and `TH22(a, a) → a`
-3. **NOT propagation** — push rail swaps through the circuit (free in NCL)
-4. **Threshold gate merging** — `TH22(TH22(...), TH22(...)) → TH44(...)`, reducing gate count by 20-50%
-5. **Completion sharing** — identical completion trees are shared, not duplicated
+2. **Idempotent collapse** — `TH12(a, a) → a` and `TH22(a, a) → a` (5-15% reduction)
+3. **NOT propagation** — push rail swaps through the circuit (free in NCL — just wire reassignment)
+4. **Threshold gate merging** — `TH22(TH22(...), TH22(...)) → TH44(...)` (20-50% reduction)
+5. **Completion sharing** — identical completion trees across pipeline stages are shared, not duplicated (30-70% reduction)
 6. **Dead rail elimination** — remove unused dual-rail signals
 
-### Synthesis and Place & Route
+### Synthesis: Threshold Gates from Standard Cells
 
-The technology mapper recognizes NCL primitives and maps them to library cells — TH22 to C-elements when available, or synthesizes C-elements from standard gates (`Q = (a & b) | (Q & (a | b))`) when they aren't. The full flow through AIG optimization, placement, PathFinder routing, and iCE40 bitstream generation works with NCL designs.
+Here's a practical problem: if you're targeting a standard FPGA or ASIC library, there are no TH22 or TH12 cells in the library. Foundries don't ship threshold gates. So how do you actually build NCL circuits on real hardware?
+
+The answer is that every threshold gate can be decomposed into standard logic gates plus a feedback path for hysteresis.
+
+The C-element (TH22) — the most important threshold gate — is implemented as:
+
+```
+Q = (A & B) | (Q & (A | B))
+```
+
+Read it in two parts:
+- `(A & B)`: when both inputs are high, output goes high (threshold met)
+- `(Q & (A | B))`: when the output is already high and at least one input is still high, output *stays* high (hysteresis/hold)
+- When both A and B are low, both terms are 0, so Q goes low (reset)
+
+This is just an AND gate, an OR gate, another AND gate, a final OR gate, and a feedback wire from the output. Standard cells. No special library needed.
+
+Similarly, TH12 decomposes to:
+
+```
+Q = A | B | (Q & (A | B))
+```
+
+Which simplifies to just `A | B` with a feedback latch — though in practice, a plain OR gate works for the true-rail side because the NCL protocol guarantees that once a rail goes high, it stays high until the NULL wavefront clears everything.
+
+The technology mapper in skalp handles this automatically. When the target library has dedicated C-element cells (some ASIC libraries do), it uses them directly — they're smaller and faster than the decomposed version. When it doesn't (most FPGAs, many ASIC libraries), it synthesizes the feedback circuit from standard gates. The NCL design works either way; you just get better area and timing with dedicated cells.
+
+For FPGAs specifically, a TH22 maps to a single LUT4 plus a feedback path through the flip-flop in the same logic cell — fitting neatly into one CLB. The LUT implements the combinational function, and the flip-flop provides the state for hysteresis. This is actually quite efficient on iCE40 and similar architectures.
+
+The full flow — AIG optimization, placement, PathFinder routing, and bitstream generation — works with NCL designs. The synthesis engine treats threshold gates as standard cells with feedback; the placer and router don't need to know they're NCL.
 
 ### Safety Integration
 
