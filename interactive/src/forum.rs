@@ -1,6 +1,4 @@
 use leptos::prelude::*;
-use leptos_router::components::{Route, Router, Routes};
-use leptos_router::path;
 use mikaana_shared::*;
 use wasm_bindgen_futures::spawn_local;
 
@@ -8,28 +6,42 @@ use crate::api;
 use crate::auth::{AuthState, LoginButton};
 use crate::votes::VoteButton;
 
+#[derive(Clone, Debug)]
+enum ForumPage {
+    Categories,
+    Threads { cat_slug: String },
+    Thread { id: i64 },
+}
+
 /// Top-level forum SPA — mounted on /discuss/*.
 #[component]
 pub fn ForumApp() -> impl IntoView {
+    let page = RwSignal::new(ForumPage::Categories);
+
     view! {
-        <Router>
-            <div class="mikaana-forum">
-                <h2><a href="/discuss/">"Discuss"</a></h2>
+        <div class="mikaana-forum">
+            <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem">
+                <h2 style="margin:0">
+                    <a href="javascript:void(0)"
+                        on:click=move |_| page.set(ForumPage::Categories)
+                        style="text-decoration:none;color:inherit"
+                    >"Discuss"</a>
+                </h2>
                 <LoginButton />
-                <Routes fallback=|| view! { <p>"Page not found."</p> }>
-                    <Route path=path!("/discuss/") view=CategoryList />
-                    <Route path=path!("/discuss/:cat_slug") view=ThreadList />
-                    <Route path=path!("/discuss/thread/:id") view=ThreadView />
-                </Routes>
             </div>
-        </Router>
+            {move || match page.get() {
+                ForumPage::Categories => view! { <CategoryList nav=page /> }.into_any(),
+                ForumPage::Threads { cat_slug } => view! { <ThreadList cat_slug=cat_slug nav=page /> }.into_any(),
+                ForumPage::Thread { id } => view! { <ThreadView thread_id=id nav=page /> }.into_any(),
+            }}
+        </div>
     }
 }
 
 // ── Categories ──
 
 #[component]
-fn CategoryList() -> impl IntoView {
+fn CategoryList(nav: RwSignal<ForumPage>) -> impl IntoView {
     let cats: RwSignal<Vec<ForumCategory>> = RwSignal::new(Vec::new());
     let loading = RwSignal::new(true);
 
@@ -52,10 +64,18 @@ fn CategoryList() -> impl IntoView {
                     key=|c| c.id
                     let:cat
                 >
-                    <a class="mikaana-category-card" href={format!("/discuss/{}", cat.slug)}>
-                        <h4>{cat.name.clone()}</h4>
-                        <p>{cat.description.clone()}</p>
-                    </a>
+                    {
+                        let slug = cat.slug.clone();
+                        view! {
+                            <a class="mikaana-category-card"
+                                href="javascript:void(0)"
+                                on:click=move |_| nav.set(ForumPage::Threads { cat_slug: slug.clone() })
+                            >
+                                <h4>{cat.name.clone()}</h4>
+                                <p>{cat.description.clone()}</p>
+                            </a>
+                        }
+                    }
                 </For>
             </div>
         </section>
@@ -65,21 +85,16 @@ fn CategoryList() -> impl IntoView {
 // ── Threads in a category ──
 
 #[component]
-fn ThreadList() -> impl IntoView {
-    let params = leptos_router::hooks::use_params_map();
+fn ThreadList(cat_slug: String, nav: RwSignal<ForumPage>) -> impl IntoView {
     let threads: RwSignal<Vec<Thread>> = RwSignal::new(Vec::new());
     let loading = RwSignal::new(true);
     let page = RwSignal::new(1i64);
     let total = RwSignal::new(0i64);
     let show_form = RwSignal::new(false);
+    let cat_slug_signal = RwSignal::new(cat_slug);
 
-    let cat_slug = Memo::new(move |_| {
-        params.get().get("cat_slug").unwrap_or_default()
-    });
-
-    // Fetch threads when page or slug changes
     Effect::new(move |_| {
-        let slug = cat_slug.get();
+        let slug = cat_slug_signal.get();
         let p = page.get();
         loading.set(true);
         spawn_local(async move {
@@ -94,12 +109,12 @@ fn ThreadList() -> impl IntoView {
 
     view! {
         <section class="mikaana-threads">
-            <h3>{move || format!("Threads in {}", cat_slug.get())}</h3>
+            <h3>{move || format!("Threads in {}", cat_slug_signal.get())}</h3>
             <button class="mikaana-btn" on:click=move |_| show_form.update(|v| *v = !*v)>
                 {move || if show_form.get() { "Cancel" } else { "New Thread" }}
             </button>
             <Show when=move || show_form.get()>
-                <NewThreadForm cat_slug=cat_slug.get_untracked() threads=threads show_form=show_form />
+                <NewThreadForm cat_slug=cat_slug_signal.get_untracked() threads=threads show_form=show_form />
             </Show>
             <Show when=move || loading.get()>
                 <p class="mikaana-loading">"Loading..."</p>
@@ -110,14 +125,22 @@ fn ThreadList() -> impl IntoView {
                     key=|t| t.id
                     let:thread
                 >
-                    <a class="mikaana-thread-card" href={format!("/discuss/thread/{}", thread.id)}>
-                        <div class="mikaana-thread-title">{thread.title.clone()}</div>
-                        <div class="mikaana-thread-meta">
-                            <span>{thread.user.username.clone()}</span>
-                            <time>{thread.created_at.clone()}</time>
-                            <span>{format!("{} replies", thread.reply_count)}</span>
-                        </div>
-                    </a>
+                    {
+                        let id = thread.id;
+                        view! {
+                            <a class="mikaana-thread-card"
+                                href="javascript:void(0)"
+                                on:click=move |_| nav.set(ForumPage::Thread { id })
+                            >
+                                <div class="mikaana-thread-title">{thread.title.clone()}</div>
+                                <div class="mikaana-thread-meta">
+                                    <span>{thread.user.username.clone()}</span>
+                                    <time>{thread.created_at.clone()}</time>
+                                    <span>{format!("{} replies", thread.reply_count)}</span>
+                                </div>
+                            </a>
+                        }
+                    }
                 </For>
             </div>
             <div class="mikaana-pagination">
@@ -174,7 +197,7 @@ fn NewThreadForm(
                         body.set(String::new());
                         show_form.set(false);
                     }
-                    Err(_) => { /* TODO: error */ }
+                    Err(_) => {}
                 }
                 submitting.set(false);
             });
@@ -206,32 +229,23 @@ fn NewThreadForm(
 // ── Thread detail + replies ──
 
 #[component]
-fn ThreadView() -> impl IntoView {
-    let params = leptos_router::hooks::use_params_map();
+fn ThreadView(thread_id: i64, #[allow(unused)] nav: RwSignal<ForumPage>) -> impl IntoView {
     let thread: RwSignal<Option<Thread>> = RwSignal::new(None);
     let replies: RwSignal<Vec<Reply>> = RwSignal::new(Vec::new());
     let loading = RwSignal::new(true);
 
-    let thread_id = Memo::new(move |_| {
-        params.get().get("id").unwrap_or_default()
-    });
-
-    Effect::new(move |_| {
-        let id = thread_id.get();
-        loading.set(true);
-        spawn_local(async move {
-            #[derive(serde::Deserialize)]
-            struct ThreadDetail {
-                thread: Thread,
-                replies: Vec<Reply>,
-            }
-            if let Ok(detail) = api::get::<ThreadDetail>(&format!("/api/forum/threads/{}", id)).await
-            {
-                thread.set(Some(detail.thread));
-                replies.set(detail.replies);
-            }
-            loading.set(false);
-        });
+    let tid = thread_id;
+    spawn_local(async move {
+        #[derive(serde::Deserialize)]
+        struct ThreadDetail {
+            thread: Thread,
+            replies: Vec<Reply>,
+        }
+        if let Ok(detail) = api::get::<ThreadDetail>(&format!("/api/forum/threads/{}", tid)).await {
+            thread.set(Some(detail.thread));
+            replies.set(detail.replies);
+        }
+        loading.set(false);
     });
 
     view! {
@@ -240,16 +254,18 @@ fn ThreadView() -> impl IntoView {
                 <p class="mikaana-loading">"Loading..."</p>
             </Show>
             {move || {
-                thread.get().map(|t| view! {
-                    <article class="mikaana-thread-detail">
-                        <h3>{t.title.clone()}</h3>
-                        <div class="mikaana-thread-meta">
-                            <img src={t.user.avatar_url.clone()} alt="" class="mikaana-avatar" width="24" height="24" />
-                            <strong>{t.user.username.clone()}</strong>
-                            <time>{t.created_at.clone()}</time>
-                        </div>
-                        <div class="mikaana-thread-body">{t.body.clone()}</div>
-                    </article>
+                thread.get().map(|t| {
+                    view! {
+                        <article class="mikaana-thread-detail">
+                            <h3>{t.title.clone()}</h3>
+                            <div class="mikaana-thread-meta">
+                                <img src={t.user.avatar_url.clone()} alt="" class="mikaana-avatar" width="24" height="24" />
+                                <strong>{t.user.username.clone()}</strong>
+                                <time>{t.created_at.clone()}</time>
+                            </div>
+                            <div class="mikaana-thread-body">{t.body.clone()}</div>
+                        </article>
+                    }
                 })
             }}
             <h4>{move || format!("Replies ({})", replies.get().len())}</h4>
@@ -270,46 +286,43 @@ fn ThreadView() -> impl IntoView {
                     </div>
                 </For>
             </div>
-            <ReplyForm thread_id=thread_id.get_untracked() replies=replies />
+            <ReplyForm thread_id=thread_id replies=replies />
         </section>
     }
 }
 
 /// Reply form.
 #[component]
-fn ReplyForm(thread_id: String, replies: RwSignal<Vec<Reply>>) -> impl IntoView {
+fn ReplyForm(thread_id: i64, replies: RwSignal<Vec<Reply>>) -> impl IntoView {
     let auth = expect_context::<AuthState>();
     let body = RwSignal::new(String::new());
     let submitting = RwSignal::new(false);
 
-    let on_submit = {
-        let tid = thread_id.clone();
-        move |ev: leptos::ev::SubmitEvent| {
-            ev.prevent_default();
-            if auth.token.get_untracked().is_none() {
-                return;
-            }
-            submitting.set(true);
-            let payload = CreateReply {
-                body: body.get_untracked(),
-            };
-            let tid = tid.clone();
-            spawn_local(async move {
-                match api::post::<Reply, _>(
-                    &format!("/api/forum/threads/{}/replies", tid),
-                    &payload,
-                )
-                .await
-                {
-                    Ok(r) => {
-                        replies.update(|list| list.push(r));
-                        body.set(String::new());
-                    }
-                    Err(_) => { /* TODO: error */ }
-                }
-                submitting.set(false);
-            });
+    let on_submit = move |ev: leptos::ev::SubmitEvent| {
+        ev.prevent_default();
+        if auth.token.get_untracked().is_none() {
+            return;
         }
+        submitting.set(true);
+        let payload = CreateReply {
+            body: body.get_untracked(),
+        };
+        let tid = thread_id;
+        spawn_local(async move {
+            match api::post::<Reply, _>(
+                &format!("/api/forum/threads/{}/replies", tid),
+                &payload,
+            )
+            .await
+            {
+                Ok(r) => {
+                    replies.update(|list| list.push(r));
+                    body.set(String::new());
+                }
+                Err(_) => {}
+            }
+            submitting.set(false);
+        });
     };
 
     move || {

@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 leptos = { version = "0.7", features = ["csr"] }
-leptos_router = "0.7"
 gloo-net = { version = "0.6", features = ["http"] }
 web-sys = { version = "0.3", features = [
     "HtmlElement",
