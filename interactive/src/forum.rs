@@ -120,7 +120,6 @@ fn ThreadList() -> impl IntoView {
                     </a>
                 </For>
             </div>
-            // Pagination
             <div class="mikaana-pagination">
                 <button
                     class="mikaana-btn mikaana-btn-sm"
@@ -132,7 +131,7 @@ fn ThreadList() -> impl IntoView {
                 <span>{move || format!("Page {}", page.get())}</span>
                 <button
                     class="mikaana-btn mikaana-btn-sm"
-                    disabled=move || page.get() * 20 >= total.get()
+                    disabled=move || { page.get() * 20 >= total.get() }
                     on:click=move |_| page.update(|p| *p += 1)
                 >
                     "Next"
