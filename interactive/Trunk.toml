@@ -1,0 +1,5 @@
+[build]
+target = "index.html"
+dist = "../static/wasm"
+public_url = "/wasm/"
+filehash = false

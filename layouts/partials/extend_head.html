@@ -1,0 +1,129 @@
+{{- /* Mikaana interactive widgets (Leptos CSR / WASM) */ -}}
+<meta name="mikaana-api" content="{{ site.Params.mikaanaApiUrl | default "" }}" />
+<link rel="modulepreload" href="/wasm/mikaana-interactive.js" crossorigin="anonymous" />
+<link rel="preload" href="/wasm/mikaana-interactive_bg.wasm" as="fetch" type="application/wasm" crossorigin="anonymous" />
+<script type="module">
+  import init, * as bindings from '/wasm/mikaana-interactive.js';
+  const wasm = await init({ module_or_path: '/wasm/mikaana-interactive_bg.wasm' });
+  dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+</script>
+<style>
+  /* ── Mikaana interactive widget styles ── */
+  .mikaana-comments,
+  .mikaana-forum { margin-top: 2rem; }
+
+  .mikaana-auth { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; }
+  .mikaana-avatar { border-radius: 50%; vertical-align: middle; }
+  .mikaana-username { font-weight: 600; }
+
+  .mikaana-btn {
+    display: inline-block;
+    padding: 0.4rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--code-bg);
+    color: var(--primary);
+    cursor: pointer;
+    font-size: 0.9rem;
+    text-decoration: none;
+  }
+  .mikaana-btn:hover { background: var(--border); }
+  .mikaana-btn-sm { padding: 0.2rem 0.5rem; font-size: 0.8rem; }
+  .mikaana-btn-danger { color: #e74c3c; border-color: #e74c3c; }
+
+  .mikaana-textarea,
+  .mikaana-input {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--code-bg);
+    color: var(--primary);
+    font-family: inherit;
+    font-size: 0.95rem;
+    margin-bottom: 0.5rem;
+    box-sizing: border-box;
+  }
+  .mikaana-textarea { min-height: 80px; resize: vertical; }
+
+  .mikaana-hint { color: var(--secondary); font-style: italic; font-size: 0.9rem; }
+  .mikaana-loading { color: var(--secondary); }
+  .mikaana-error { color: #e74c3c; }
+
+  /* Comments */
+  .mikaana-comment {
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .mikaana-comment-header {
+    display: flex; align-items: center; gap: 0.5rem;
+    margin-bottom: 0.4rem; font-size: 0.85rem;
+  }
+  .mikaana-comment-header time { color: var(--secondary); }
+  .mikaana-comment-body { margin: 0; line-height: 1.6; }
+  .mikaana-comment-form { margin-bottom: 1.5rem; }
+
+  /* Votes */
+  .mikaana-votes {
+    display: inline-flex; align-items: center; gap: 0.3rem;
+    font-size: 0.85rem;
+  }
+  .mikaana-vote-btn {
+    background: none; border: none; cursor: pointer;
+    color: var(--secondary); font-size: 0.75rem; padding: 2px 4px;
+  }
+  .mikaana-vote-btn:hover,
+  .mikaana-vote-btn.active { color: var(--primary); }
+  .mikaana-vote-btn:disabled { opacity: 0.4; cursor: default; }
+  .mikaana-vote-count { min-width: 1.5em; text-align: center; }
+  .mikaana-post-votes {
+    display: flex; align-items: center; gap: 0.5rem;
+    margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);
+  }
+
+  /* Forum */
+  .mikaana-category-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 1rem; margin-top: 1rem;
+  }
+  .mikaana-category-card {
+    display: block; padding: 1rem;
+    border: 1px solid var(--border); border-radius: 6px;
+    text-decoration: none; color: var(--primary);
+  }
+  .mikaana-category-card:hover { background: var(--code-bg); }
+  .mikaana-category-card h4 { margin: 0 0 0.3rem; }
+  .mikaana-category-card p { margin: 0; color: var(--secondary); font-size: 0.9rem; }
+
+  .mikaana-thread-list { margin-top: 1rem; }
+  .mikaana-thread-card {
+    display: block; padding: 0.75rem;
+    border-bottom: 1px solid var(--border);
+    text-decoration: none; color: var(--primary);
+  }
+  .mikaana-thread-card:hover { background: var(--code-bg); }
+  .mikaana-thread-title { font-weight: 600; }
+  .mikaana-thread-meta {
+    display: flex; gap: 1rem; font-size: 0.8rem; color: var(--secondary); margin-top: 0.25rem;
+  }
+  .mikaana-thread-form,
+  .mikaana-reply-form { margin: 1rem 0; }
+
+  .mikaana-thread-detail { margin-bottom: 1.5rem; }
+  .mikaana-thread-body { margin-top: 0.75rem; line-height: 1.6; }
+
+  .mikaana-reply {
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .mikaana-reply-header {
+    display: flex; align-items: center; gap: 0.5rem;
+    margin-bottom: 0.4rem; font-size: 0.85rem;
+  }
+  .mikaana-reply-header time { color: var(--secondary); }
+
+  .mikaana-pagination {
+    display: flex; align-items: center; gap: 1rem;
+    margin-top: 1rem; justify-content: center;
+  }
+</style>

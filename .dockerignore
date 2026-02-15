@@ -1,0 +1,15 @@
+target/
+public/
+resources/
+static/wasm/
+themes/
+content/
+layouts/
+assets/
+archetypes/
+data/
+i18n/
+.git/
+.github/
+*.db
+*.toml.bak

@@ -1,0 +1,3 @@
+[workspace]
+members = ["shared", "interactive", "api"]
+resolver = "2"
