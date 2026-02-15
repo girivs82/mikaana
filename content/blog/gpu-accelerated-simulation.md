@@ -65,16 +65,16 @@ Here's the pipeline:
 
 ```
                         ┌──────────────────┐
-                        │    SIR Module     │
-                        │  (combinational + │
-                        │   sequential)     │
+                        │   SIR Module     │
+                        │ (combinational + │
+                        │  sequential)     │
                         └────────┬─────────┘
                                  │
                         ┌────────▼─────────┐
-                        │  SharedCodegen    │
+                        │  SharedCodegen   │
                         │  (expressions,   │
-                        │   struct layouts, │
-                        │   eval bodies)    │
+                        │  struct layouts, │
+                        │  eval bodies)    │
                         └──┬───────────┬───┘
                            │           │
                   ┌────────▼──┐   ┌───▼────────┐
@@ -334,7 +334,7 @@ The `convert_mir_to_sir_with_hierarchy()` function is the entry point for SIR co
 ```
 MIR (hierarchical)              SIR (flat)
 ┌─────────────────┐            ┌──────────────────────────┐
-│  top_module      │            │  SirModule               │
+│  top_module     │            │  SirModule               │
 │  ├─ ports       │            │  ├─ inputs/outputs       │
 │  ├─ signals     │            │  ├─ signals (all flat)   │
 │  ├─ processes   │ ────────►  │  ├─ combinational_nodes  │
@@ -643,35 +643,35 @@ The `step()` method in `GpuRuntime` executes one simulation cycle. It has six ph
 ```
                   step() begins
                        │
-              ┌────────▼────────┐
+              ┌─────────▼────────┐
          1.   │  Create register │  Copy main → shadow
               │    snapshot      │  (shadow = frozen pre-edge state)
-              └────────┬────────┘
-                       │
-              ┌────────▼────────┐
+              └─────────┬────────┘
+                        │
+              ┌─────────▼────────┐
          2.   │  Combinational   │  Inputs + old registers → signals
               │  (old state)     │  (GPU dispatch, all cones batched)
-              └────────┬────────┘
-                       │
-              ┌────────▼────────┐
+              └─────────┬────────┘
+                        │
+              ┌─────────▼────────┐
          3.   │  Sequential      │  Only on rising edge
               │  update          │  Reads shadow (frozen), writes main
-              └────────┬────────┘
-                       │
-              ┌────────▼────────┐
+              └─────────┬────────┘
+                        │
+              ┌─────────▼────────┐
          4.   │  Combinational   │  Inputs + new registers → signals
               │  (new state)     │  (FWFT: outputs reflect updates)
-              └────────┬────────┘
-                       │
-              ┌────────▼────────┐
+              └─────────┬────────┘
+                        │
+              ┌─────────▼────────┐
          5.   │  Capture         │  Copy signal outputs → output buffer
               │  outputs         │  (with bit-width masking)
-              └────────┬────────┘
-                       │
-              ┌────────▼────────┐
+              └─────────┬────────┘
+                        │
+              ┌─────────▼────────┐
          6.   │  Update clock    │  Shift current → previous
               │  previous values │  (prevents false edge detection)
-              └────────┘
+              └──────────────────┘
 ```
 
 **Phase 1: `create_register_snapshot()`** copies the current register buffer to the shadow buffer. This frozen snapshot is what the sequential kernel reads from. Without this, the sequential kernel would read partially-updated register values — flip-flop A updates, then flip-flop B reads A's new value instead of its pre-edge value. The snapshot guarantees all flip-flops see consistent pre-edge state, matching real hardware semantics where all flip-flops sample on the same clock edge.
@@ -856,15 +856,15 @@ The crucial property: each fault simulation is completely independent. Thread 0 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Fault Campaign                           │
-│  [Fault0] [Fault1] [Fault2] ... [FaultN]                   │
+│  [Fault0] [Fault1] [Fault2] ... [FaultN]                    │
 └─────────────────────┬───────────────────────────────────────┘
                       │ GPU dispatch (one thread per fault)
                       ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                   Metal Compute Shader                      │
-│  thread[0]: simulate(design, fault0, vectors) → detected0  │
-│  thread[1]: simulate(design, fault1, vectors) → detected1  │
-│  thread[2]: simulate(design, fault2, vectors) → detected2  │
+│  thread[0]: simulate(design, fault0, vectors) → detected0   │
+│  thread[1]: simulate(design, fault1, vectors) → detected1   │
+│  thread[2]: simulate(design, fault2, vectors) → detected2   │
 │  ...                                                        │
 └─────────────────────────────────────────────────────────────┘
 ```

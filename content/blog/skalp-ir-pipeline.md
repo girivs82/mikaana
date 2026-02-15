@@ -30,7 +30,7 @@ The four IRs form two paths that share a common prefix and diverge after MIR:
 
 ```
                 ┌───────────────────────────────────────────────────────┐
-                │                  skalp Source (.sk)                    │
+                │                  skalp Source (.sk)                   │
                 └───────────────────────┬───────────────────────────────┘
                                         │ parse + resolve
                                         ▼
