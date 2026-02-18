@@ -8,7 +8,7 @@ ShowToc: true
 
 **skalp** (from Sanskrit *संकल्पना — Sankalpana*, "conception with purpose") is a hardware description language I'm building in Rust. It sits between the tedium of RTL and the unpredictability of HLS, preserving design intent throughout the entire compilation pipeline.
 
-<div id="mikaana-github-stats" data-repo="girivs82/skalp"></div>
+{{< github-stats repo="girivs82/skalp" >}}
 
 ---
 
