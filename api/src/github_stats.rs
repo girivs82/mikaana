@@ -89,7 +89,7 @@ async fn fetch_stats(repo: &str) -> Result<GitHubStats, String> {
         .map_err(|e| e.to_string())?;
 
     let rust_bytes = languages.get("Rust").copied().unwrap_or(0);
-    let lines_of_code = rust_bytes / 35; // ~35 bytes per line of Rust on average
+    let lines_of_code = rust_bytes / 53; // ~53 bytes per line of Rust (measured against actual LOC)
 
     // Get commit count from Link header
     let commits_resp = client
