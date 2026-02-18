@@ -76,7 +76,7 @@ jobs:
           commits = 0
           for part in link.split(","):
               if 'rel="last"' in part:
-                  m = re.search(r'page=(\d+)', part)
+                  m = re.search(r'[?&]page=(\d+)', part)
                   if m:
                       commits = int(m.group(1))
 
