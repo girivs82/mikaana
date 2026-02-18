@@ -98,3 +98,16 @@ pub struct Paginated<T> {
     pub page: i64,
     pub per_page: i64,
 }
+
+// ── GitHub Stats ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitHubStats {
+    pub commits: i64,
+    pub lines_of_code: i64,
+    pub crate_count: i64,
+    pub stars: i64,
+    pub forks: i64,
+    pub open_issues: i64,
+    pub last_push: String,
+}

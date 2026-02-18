@@ -2,6 +2,7 @@ mod auth;
 mod comments;
 mod db;
 mod forum;
+mod github_stats;
 mod votes;
 
 use axum::{
@@ -72,6 +73,8 @@ async fn main() {
             "/api/votes",
             get(votes::get_votes).post(votes::cast_vote),
         )
+        // GitHub Stats
+        .route("/api/github-stats", get(github_stats::get_github_stats))
         // Forum
         .route("/api/forum/categories", get(forum::list_categories))
         .route(
