@@ -61,6 +61,40 @@ jobs:
       - name: Build WASM interactive widgets
         run: cd interactive && trunk build --release
 
+      - name: Fetch GitHub stats
+        run: |
+          mkdir -p data
+          python3 << 'PYEOF'
+          import urllib.request, json, re
+          repo = "girivs82/skalp"
+          base = f"https://api.github.com/repos/{repo}"
+          headers = {"User-Agent": "mikaana-build"}
+
+          req = urllib.request.Request(f"{base}/commits?per_page=1", headers=headers)
+          resp = urllib.request.urlopen(req)
+          link = resp.headers.get("Link", "")
+          commits = 0
+          for part in link.split(","):
+              if 'rel="last"' in part:
+                  m = re.search(r'page=(\d+)', part)
+                  if m:
+                      commits = int(m.group(1))
+
+          req = urllib.request.Request(f"{base}/languages", headers=headers)
+          resp = urllib.request.urlopen(req)
+          rust_bytes = json.loads(resp.read()).get("Rust", 0)
+
+          req = urllib.request.Request(f"{base}/contents/crates", headers=headers)
+          resp = urllib.request.urlopen(req)
+          entries = json.loads(resp.read())
+          crate_count = len([e for e in entries if e["type"] == "dir"]) + 2
+
+          stats = {"commits": commits, "lines_of_code": rust_bytes // 53, "crate_count": crate_count}
+          with open("data/github_stats.json", "w") as f:
+              json.dump(stats, f)
+          print(f"Stats: {stats}")
+          PYEOF
+
       - name: Build with Hugo
         env:
           HUGO_CACHEDIR: ${{ runner.temp }}/hugo_cache

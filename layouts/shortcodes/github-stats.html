@@ -1,1 +1,7 @@
-<div id="mikaana-github-stats" data-repo="{{ .Get "repo" }}"></div>
+{{- $repo := .Get "repo" -}}
+{{- $stats := .Site.Data.github_stats -}}
+{{- if $stats -}}
+<a href="https://github.com/{{ $repo }}" target="_blank" rel="noopener">GitHub</a> | ~{{ div $stats.lines_of_code 1000 }}K lines of Rust | {{ $stats.crate_count }} workspace crates | {{ lang.FormatNumber 0 $stats.commits }} commits
+{{- else -}}
+<a href="https://github.com/{{ $repo }}" target="_blank" rel="noopener">GitHub</a>
+{{- end -}}
