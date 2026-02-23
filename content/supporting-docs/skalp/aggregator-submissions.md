@@ -16,7 +16,7 @@ The core idea: hardware design tools throw away too much intent too early. You w
 
 The thing I'm most interested in technically is clock domain crossings as compile-time types. If you've worked on multi-clock designs, you know CDC bugs are some of the hardest to find. In SKALP, clock domains are parameterized types (think Rust lifetimes but for clocks), so connecting signals across domains without a proper synchronizer is a compiler error, not a simulation surprise at 3am.
 
-Other pieces that might be interesting: GPU-accelerated fault simulation via Metal (~11M fault-cycle sims/sec on M4 Max), integrated P&R targeting iCE40 FPGAs, built-in formal verification, and ISO 26262 FMEDA generation. The syntax is expression-based and Rust-influenced — traits, generics, pattern matching.
+Other pieces that might be interesting: GPU-accelerated fault simulation via Metal (~11M fault-cycle sims/sec on M4 Max), integrated P&R targeting iCE40 FPGAs, built-in formal verification, and ISO 26262 FMEDA generation. There's also a VSCode extension with an integrated waveform viewer, a debug adapter with cycle-level stepping and conditional breakpoints, and testbench integration through the test explorer. The syntax is expression-based and Rust-influenced — traits, generics, pattern matching.
 
 It's still early. The iCE40 backend works but coverage is limited, and the GPU path is macOS-only for now. The codebase is ~290K lines across 23 crates.
 
@@ -43,7 +43,7 @@ I've been building an HDL called SKALP and just released v0.1.1. I wanted to sha
 
 - **CDC bugs at compile time.** Clock domains are types in SKALP, parameterized like Rust lifetimes. If you try to read a signal from `clk_a` domain in a `clk_b` process without going through a synchronizer, the compiler rejects it. No lint tool, no separate CDC checker — it's structural.
 
-- **Tool fragmentation.** A typical FPGA flow involves an HDL, a simulator (maybe two), a synthesis tool, a P&R tool, a formal tool, a lint tool, and a bunch of TCL glue. SKALP integrates all of these. `skalp build` goes from source to bitstream for iCE40.
+- **Tool fragmentation.** A typical FPGA flow involves an HDL, a simulator (maybe two), a synthesis tool, a P&R tool, a formal tool, a lint tool, and a bunch of TCL glue. SKALP integrates all of these. `skalp build` goes from source to bitstream for iCE40. The VSCode extension includes a waveform viewer, a debug adapter with cycle-level stepping and conditional breakpoints, and testbench integration — so you don't need to leave the editor to simulate and debug.
 
 - **Lost intent.** SystemVerilog and VHDL flatten everything to RTL very early. SKALP uses four IRs internally — high-level algorithmic, structured, RTL, and gate-level — so synthesis can exploit knowledge about FSMs, pipelines, and dataflow that would otherwise be lost.
 

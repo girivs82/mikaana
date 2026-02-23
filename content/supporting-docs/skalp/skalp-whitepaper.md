@@ -102,7 +102,7 @@ Several design decisions are visible in this example. The `entity` declaration d
 
 SKALP provides a rich type system designed for hardware:
 
-- **Bit vectors:** `bit[N]` for 2-state N-bit values, `logic[N]` for 4-state values (supporting X and Z).
+- **Bit vectors:** `bit[N]` for 2-state N-bit values, `logic[N]` for simulation-compatible vectors (maps to SystemVerilog `logic`; X/Z are modeled as deterministic values rather than true 4-state simulation).
 - **Numeric types:** `nat[N]` for unsigned naturals, `int[N]` for signed integers, with width inference.
 - **Fixed-point:** First-class support via `fixed<I, F>` specifying integer and fractional bit widths.
 - **Clock and reset:** `clock` and `reset(active_high)` / `reset(active_low)` are distinct types with domain tracking.
@@ -418,7 +418,7 @@ SKALP provides a unified command-line interface:
 - `skalp new` -- Create new project from template
 - `skalp add/remove/update/search` -- Package management
 
-An LSP server (`skalp-lsp` crate) provides IDE integration with a VSCode extension for syntax highlighting, diagnostics, go-to-definition, and completion.
+An LSP server (`skalp-lsp` crate) provides IDE integration including go-to-definition, find references, context-aware completion, hover documentation, document and workspace symbols, semantic token highlighting, and real-time diagnostics. The accompanying VSCode extension (`vscode-skalp`) adds an integrated waveform viewer for `.skw` files with zoom, pan, multi-radix signal display, and breakpoint markers; a Debug Adapter Protocol (DAP) implementation supporting cycle-level and half-cycle stepping, conditional breakpoints, and variable inspection across input, output, register, and signal scopes; testbench integration through VSCode's test explorer with per-test waveform association; and schematic and expression viewers.
 
 ### 7.5 Standard Library
 
@@ -489,7 +489,7 @@ We are candid about SKALP's current limitations:
 
 **Standard library coverage.** While the standard library includes common components, coverage of complex IP blocks (DDR controllers, PCIe interfaces, Ethernet MACs) is limited. The package manager infrastructure is in place to support community-contributed libraries.
 
-**Language evolution.** Some language features (e.g., trait bounds on generic entities, async/await for testbenches, comprehensive pattern matching coverage checking) are partially implemented and continue to evolve.
+**Language evolution.** Some language features (e.g., trait bound enforcement at instantiation time, comprehensive pattern matching exhaustiveness checking) are partially implemented and continue to evolve.
 
 Future work priorities include: expanding FPGA target support, porting the GPU backend to Vulkan/WebGPU, scaling formal verification, expanding the standard library, publishing benchmark comparisons against established tools, and building a community package ecosystem.
 
