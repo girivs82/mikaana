@@ -1,6 +1,6 @@
 # SKALP: An Intent-Preserving Hardware Description Language with Compile-Time Clock Domain Safety and GPU-Accelerated Fault Simulation
 
-**Authors:** SKALP Contributors
+**Authors:** Shankar Giri V
 
 **Repository:** https://github.com/girivs82/skalp
 
