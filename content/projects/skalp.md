@@ -643,6 +643,8 @@ examples/
 
 ## Current Status
 
+**[v0.1.1](https://github.com/girivs82/skalp/releases/tag/v0.1.1)** is the latest release, with pre-built binaries for Linux (x86_64), macOS (x86_64 + ARM64), and Windows (x86_64). See the [release announcement](/news/skalp-v0.1.1/) for details.
+
 The compiler pipeline from source through HIR, MIR, and SystemVerilog codegen is functional. The frontend parses the full language grammar, the type checker catches CDC violations and width mismatches, and the codegen produces synthesizable SystemVerilog with proper synchronizers and memory inference.
 
 The synthesis backend is implemented with AIG optimization, technology mapping, and cell sizing across multiple target libraries. The native place-and-route engine targets iCE40 FPGAs with analytical and simulated annealing placement, PathFinder routing, and IceStorm bitstream generation.
