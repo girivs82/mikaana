@@ -1,4 +1,4 @@
-# Aggregator Submission Drafts for SKALP v0.1.0
+# Aggregator Submission Drafts for SKALP v0.1.1
 
 ---
 
@@ -10,7 +10,7 @@ Show HN: SKALP – An intent-driven hardware language with clock domains as type
 
 ### Author Comment
 
-I've been working on SKALP, a hardware description language written in Rust, and just shipped v0.1.0 with pre-built binaries for Linux, macOS, and Windows.
+I've been working on SKALP, a hardware description language written in Rust, and just shipped v0.1.1 with pre-built binaries for Linux, macOS, and Windows.
 
 The core idea: hardware design tools throw away too much intent too early. You write a state machine, but by the time it hits synthesis, the tool only sees a bag of gates and has to reverse-engineer what you meant. SKALP keeps that intent through four intermediate representations — from a high-level algorithmic IR down to gate-level netlist — so each compilation stage has the context it needs to make good decisions.
 
@@ -31,11 +31,11 @@ Blog post on the IR pipeline: https://mikaana.com/blog/skalp-ir-pipeline/
 
 ### Title
 
-SKALP v0.1.0: A new HDL with compile-time clock domain checking, integrated synthesis, and iCE40 P&R — looking for feedback from FPGA engineers
+SKALP v0.1.1: A new HDL with compile-time clock domain checking, integrated synthesis, and iCE40 P&R — looking for feedback from FPGA engineers
 
 ### Body
 
-I've been building an HDL called SKALP and just released v0.1.0. I wanted to share it here because the FPGA community is who I built this for, and I'd genuinely appreciate feedback on whether the problems I'm solving are the ones that actually hurt.
+I've been building an HDL called SKALP and just released v0.1.1. I wanted to share it here because the FPGA community is who I built this for, and I'd genuinely appreciate feedback on whether the problems I'm solving are the ones that actually hurt.
 
 **What is it?** SKALP is an intent-driven hardware description language with its own compiler, simulator, synthesis engine, and place-and-route backend (currently targeting iCE40). It's written in Rust, and the syntax borrows from Rust too — expression-based, with traits, generics, and pattern matching.
 
@@ -72,7 +72,7 @@ SKALP: A hardware description language in Rust (~221K lines, 24 crates) — cloc
 
 ### Body
 
-I just released v0.1.0 of SKALP, a hardware description language and integrated toolchain written entirely in Rust. Thought this community might find the compiler architecture interesting.
+I just released v0.1.1 of SKALP, a hardware description language and integrated toolchain written entirely in Rust. Thought this community might find the compiler architecture interesting.
 
 **The type system idea.** In hardware, clock domain crossings (passing data between different clock frequencies) are a notorious source of bugs. SKALP models clock domains as compile-time type parameters — conceptually similar to how Rust uses lifetimes to prevent use-after-free. A signal typed as `Signal<ClkA, u8>` can't be used in a `ClkB` process without going through a synchronizer primitive. The compiler enforces this statically.
 
@@ -102,7 +102,7 @@ SKALP: A hardware compiler that treats clock domains like Rust treats lifetimes 
 
 ### Body
 
-I've been building a hardware description language called SKALP and just shipped v0.1.0. The short version: it's an integrated toolchain — compiler, simulator, synthesis, place-and-route, formal verification — for designing digital circuits, written in Rust.
+I've been building a hardware description language called SKALP and just shipped v0.1.1. The short version: it's an integrated toolchain — compiler, simulator, synthesis, place-and-route, formal verification — for designing digital circuits, written in Rust.
 
 **Why build a new HDL?** The dominant hardware languages (Verilog, VHDL) are from the 1980s. They're essentially simulation languages that we've bolted synthesis onto. You describe behavior, the tools infer structure, and a whole class of bugs lives in the gap between what you meant and what the tools understood.
 
