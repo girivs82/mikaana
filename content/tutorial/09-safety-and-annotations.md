@@ -570,10 +570,10 @@ impl UartTop {
     let tx_fifo = FIFO<DATA_BITS, FIFO_DEPTH> {
         clk: clk,
         rst: rst,
-        write_en: tx_valid & tx_ready,
-        write_data: tx_data,
-        read_en: tx_fifo_read,
-        read_data: tx_fifo_data,
+        wr_en: tx_valid & tx_ready,
+        wr_data: tx_data,
+        rd_en: tx_fifo_read,
+        rd_data: tx_fifo_data,
         full: tx_fifo_full,
         empty: tx_fifo_empty_internal
     }
@@ -581,10 +581,10 @@ impl UartTop {
     let rx_fifo = FIFO<DATA_BITS, FIFO_DEPTH> {
         clk: clk,
         rst: rst,
-        write_en: rx_write_en,
-        write_data: rx_byte_data,
-        read_en: rx_read,
-        read_data: rx_data,
+        wr_en: rx_write_en,
+        wr_data: rx_byte_data,
+        rd_en: rx_read,
+        rd_data: rx_data,
         full: rx_fifo_full_internal,
         empty: rx_fifo_empty
     }

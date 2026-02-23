@@ -212,25 +212,25 @@ impl UartTop {
 
     // Instantiate the TX and RX FIFOs with the parameterized depth.
     let tx_fifo = FIFO<DATA_BITS, FIFO_DEPTH> {
-        clk: clk,
-        rst: rst,
-        write_en: tx_valid & tx_ready,
-        write_data: tx_data,
-        read_en: tx_fifo_read,
-        read_data: tx_fifo_data,
-        full: tx_fifo_full,
-        empty: tx_fifo_empty_internal
+        clk:     clk,
+        rst:     rst,
+        wr_en:   tx_valid & tx_ready,
+        wr_data: tx_data,
+        rd_en:   tx_fifo_read,
+        rd_data: tx_fifo_data,
+        full:    tx_fifo_full,
+        empty:   tx_fifo_empty_internal
     }
 
     let rx_fifo = FIFO<DATA_BITS, FIFO_DEPTH> {
-        clk: clk,
-        rst: rst,
-        write_en: rx_byte_valid,
-        write_data: rx_byte_data,
-        read_en: rx_read,
-        read_data: rx_data,
-        full: rx_fifo_full_internal,
-        empty: rx_fifo_empty
+        clk:     clk,
+        rst:     rst,
+        wr_en:   rx_byte_valid,
+        wr_data: rx_byte_data,
+        rd_en:   rx_read,
+        rd_data: rx_data,
+        full:    rx_fifo_full_internal,
+        empty:   rx_fifo_empty
     }
 
     // Internal signals for TX path.
@@ -271,6 +271,9 @@ impl UartTop {
     // ── TX Sequential Logic ─────────────────────────────────
 
     on(clk.rise) {
+        // Default: tx_fifo_read pulses for one cycle only
+        tx_fifo_read = 0
+
         if rst {
             tx_state = TX_IDLE
             tx_baud_counter = 0

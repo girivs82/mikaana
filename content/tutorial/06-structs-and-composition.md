@@ -240,11 +240,11 @@ impl UartTop {
     // There is no positional port binding — names are mandatory.
 
     let tx_fifo = FIFO<8, FIFO_DEPTH> {
-        clk: clk,
-        rst: rst,
-        write_en: tx_write,
-        write_data: tx_data,
-        read_en: tx_read_en
+        clk:     clk,
+        rst:     rst,
+        wr_en:   tx_write,
+        wr_data: tx_data,
+        rd_en:   tx_read_en
     }
 
     // tx_read_en is a combinational signal that pulses when the
@@ -261,7 +261,7 @@ impl UartTop {
         data_bits: config.data_bits,
         parity_enable: config.parity_enable,
         stop_bits: config.stop_bits,
-        data_in: tx_fifo.read_data,
+        data_in: tx_fifo.rd_data,
         data_valid: tx_read_en,
         tx: _,         // connected to top-level tx below
         busy: _        // read via uart_tx.busy
@@ -294,13 +294,13 @@ impl UartTop {
     let rx_fifo = FIFO<8, FIFO_DEPTH> {
         clk: clk,
         rst: rst,
-        write_en: uart_rx.rx_valid,
-        write_data: uart_rx.data_out,
-        read_en: rx_read
+        wr_en: uart_rx.rx_valid,
+        wr_data: uart_rx.data_out,
+        rd_en: rx_read
     }
 
     // Drive the top-level rx_data output from the RX FIFO.
-    rx_data = rx_fifo.read_data
+    rx_data = rx_fifo.rd_data
 
     // --- Status aggregation ---
     //

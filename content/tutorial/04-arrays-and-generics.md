@@ -321,12 +321,12 @@ impl UartBuffered {
     // UART transmit enable — when we pop a byte from the FIFO,
     // we simultaneously start transmitting it.
     let uart_tx = UartTx {
-        clk:     clk,
-        rst:     rst,
-        tx_data: tx_fifo_data,
-        tx_en:   tx_fifo_read,
-        tx:      tx,
-        tx_busy: tx_busy
+        clk:      clk,
+        rst:      rst,
+        tx_data:  tx_fifo_data,
+        tx_start: tx_fifo_read,
+        tx:       tx,
+        tx_busy:  tx_busy
     }
 
     // UART receiver — writes to the RX FIFO.

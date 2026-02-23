@@ -386,12 +386,12 @@ impl UartLoopback {
     signal serial_wire: bit
 
     let tx = UartTx {
-        clk:     clk,
-        rst:     rst,
-        tx_data: send_data,
-        tx_en:   send_en,
-        tx:      serial_wire,
-        tx_busy: tx_busy
+        clk:      clk,
+        rst:      rst,
+        tx_data:  send_data,
+        tx_start: send_en,
+        tx:       serial_wire,
+        tx_busy:  tx_busy
     }
 
     let rx = UartRx {

@@ -215,7 +215,7 @@ impl AsyncFIFO {
     // Pointer width needs one extra bit for full/empty disambiguation.
     // A 16-deep FIFO uses 5-bit pointers (0-31), where the MSB
     // distinguishes "same position, empty" from "same position, full."
-    signal ADDR_BITS: nat = clog2(DEPTH) + 1
+    const ADDR_BITS: nat = clog2(DEPTH) + 1
 
     // --- Write domain signals ---
     signal wr_ptr:      nat[ADDR_BITS]       // binary write pointer
@@ -241,7 +241,7 @@ impl AsyncFIFO {
     signal rd_gray_ff2: bit[ADDR_BITS]
 
     // --- Memory ---
-    signal mem: bit[WIDTH][DEPTH]
+    signal mem: [bit[WIDTH]; DEPTH]
 
     // ===================================================================
     // Write domain logic
