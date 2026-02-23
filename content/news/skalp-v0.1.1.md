@@ -1,18 +1,18 @@
 ---
-title: "skalp v0.1.0 Released"
-date: 2026-02-22
+title: "skalp v0.1.1 Released"
+date: 2026-02-23
 summary: "First release of skalp — an intent-driven hardware description language with compile-time clock domain safety, built-in synthesis, and native FPGA place & route."
 tags: ["skalp", "release", "hardware", "hdl"]
 ShowToc: true
 ---
 
-[skalp](/projects/skalp/) v0.1.0 is out — the first release of an intent-driven hardware description language that preserves design intent from algorithm to gates, with compile-time clock domain safety and progressive refinement.
+[skalp](/projects/skalp/) v0.1.1 is out — the first release of an intent-driven hardware description language that preserves design intent from algorithm to gates, with compile-time clock domain safety and progressive refinement.
 
-Pre-built binaries are available for Linux, macOS, and Windows. [Get it on GitHub.](https://github.com/girivs82/skalp/releases/tag/v0.1.0)
+Pre-built binaries are available for Linux, macOS, and Windows. [Get it on GitHub.](https://github.com/girivs82/skalp/releases/tag/v0.1.1)
 
 ---
 
-## What's in v0.1.0
+## What's in v0.1.1
 
 ### Language
 
@@ -30,7 +30,7 @@ Pre-built binaries are available for Linux, macOS, and Windows. [Get it on GitHu
 - Code generation targeting SystemVerilog, Verilog, and VHDL
 - Hierarchical gate-level synthesis with per-instance optimization
 - NCL asynchronous circuit support for clockless, delay-insensitive designs
-- ML-guided logic synthesis with AIG-based optimization and learned pass ordering
+- AIG-based logic optimization with configurable pass sequences
 - iCE40 FPGA backend with native place-and-route and programmer support
 - Clock domain crossing analysis with automatic synchronizer generation
 
@@ -69,23 +69,23 @@ Pre-built binaries are available for Linux, macOS, and Windows. [Get it on GitHu
 
 | Platform | Binary |
 |---|---|
-| Linux x86_64 | [`skalp-linux-x86_64`](https://github.com/girivs82/skalp/releases/tag/v0.1.0) |
-| macOS x86_64 | [`skalp-macos-x86_64`](https://github.com/girivs82/skalp/releases/tag/v0.1.0) |
-| macOS ARM64 | [`skalp-macos-arm64`](https://github.com/girivs82/skalp/releases/tag/v0.1.0) |
-| Windows x86_64 | [`skalp-windows-x86_64.exe`](https://github.com/girivs82/skalp/releases/tag/v0.1.0) |
+| Linux x86_64 | [`skalp-linux-x86_64`](https://github.com/girivs82/skalp/releases/tag/v0.1.1) |
+| macOS x86_64 | [`skalp-macos-x86_64`](https://github.com/girivs82/skalp/releases/tag/v0.1.1) |
+| macOS ARM64 | [`skalp-macos-arm64`](https://github.com/girivs82/skalp/releases/tag/v0.1.1) |
+| Windows x86_64 | [`skalp-windows-x86_64.exe`](https://github.com/girivs82/skalp/releases/tag/v0.1.1) |
 
 Download the binary for your platform and add it to your `PATH`.
 
 ### From source
 
 ```bash
-cargo install --git https://github.com/girivs82/skalp --tag v0.1.0
+cargo install --git https://github.com/girivs82/skalp --tag v0.1.1
 ```
 
 ---
 
 ## Links
 
-- [GitHub release](https://github.com/girivs82/skalp/releases/tag/v0.1.0)
+- [GitHub release](https://github.com/girivs82/skalp/releases/tag/v0.1.1)
 - [Project page](/projects/skalp/)
 - [Source code](https://github.com/girivs82/skalp)
