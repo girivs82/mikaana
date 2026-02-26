@@ -579,6 +579,92 @@ Verify that sending byte `0x00` produces `UartCommand::Reset`, byte `0x01` produ
 
 ---
 
+## Testing Your Design
+
+In the test API, enum values are represented as their integer encoding. `AluOp::Add` is `0b000` (0), `AluOp::Sub` is `0b001` (1), and so on. When checking enum-typed output ports, compare against the integer value.
+
+Here are tests from `tests/ch07_test.rs`:
+
+### ALU
+
+```rust
+// AluOp encoding (from alu.sk)
+const ALU_ADD: u64 = 0b000;
+const ALU_SUB: u64 = 0b001;
+const ALU_SHL: u64 = 0b101;
+const ALU_EQ:  u64 = 0b111;
+
+#[test]
+fn test_alu_add() {
+    let mut tb = Testbench::new("Alu");
+    tb.reset(2);
+
+    tb.set("op", ALU_ADD);
+    tb.set("a", 100);
+    tb.set("b", 50);
+    tb.clock();
+
+    tb.expect("result", 150);
+    tb.expect("zero_flag", 0);
+}
+
+#[test]
+fn test_alu_zero_flag() {
+    let mut tb = Testbench::new("Alu");
+    tb.reset(2);
+
+    // 42 - 42 = 0 -> zero flag set
+    tb.set("op", ALU_SUB);
+    tb.set("a", 42);
+    tb.set("b", 42);
+    tb.clock();
+
+    tb.expect("result", 0);
+    tb.expect("zero_flag", 1);
+}
+```
+
+### UartCommandParser
+
+```rust
+#[test]
+fn test_cmd_two_byte() {
+    let mut tb = Testbench::new("UartCommandParser");
+    tb.reset(2);
+
+    // Send SetBaud (requires a data byte)
+    tb.set("rx_data", 0x01); // CMD_SET_BAUD
+    tb.set("rx_valid", 1);
+    tb.clock();
+    tb.set("rx_valid", 0);
+    tb.clock();
+
+    // Not valid yet — waiting for data
+    tb.expect("cmd_valid", 0);
+
+    // Send the data byte
+    tb.set("rx_data", 0x42);
+    tb.set("rx_valid", 1);
+    tb.clock();
+    tb.set("rx_valid", 0);
+
+    // Command complete
+    tb.expect("cmd_valid", 1);
+    tb.expect("cmd", 0x01); // SetBaud
+    tb.expect("cmd_data", 0x42);
+}
+```
+
+Run with:
+
+```bash
+skalp test
+```
+
+**Exercise:** Write a `test_alu_shift` test that verifies left shift (`1 << 3 = 8`) and right shift (`0x80 >> 4 = 0x08`).
+
+---
+
 ## Quick Reference
 
 | Concept | Syntax | Example |

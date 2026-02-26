@@ -437,6 +437,104 @@ Verify in the waveform viewer:
 
 ---
 
+## Testing Your Design
+
+FIFOs have structural invariants — the count must always match the number of writes minus reads, `empty` must be set when count is zero, and `full` must be set when count equals depth. Testbenches for data structures should verify these invariants, not just input/output values.
+
+Here are representative tests from `tests/ch04_test.rs`:
+
+### FIFO
+
+```rust
+#[test]
+fn test_fifo_empty_after_reset() {
+    let mut tb = Testbench::new("FIFO");
+    tb.reset(2);
+
+    tb.expect("empty", 1);
+    tb.expect("full", 0);
+    tb.expect("count", 0);
+}
+
+#[test]
+fn test_fifo_full_flag() {
+    let mut tb = Testbench::new("FIFO");
+    tb.reset(2);
+
+    // Write 16 entries (default DEPTH = 16)
+    for i in 0..16u64 {
+        tb.set("wr_en", 1);
+        tb.set("wr_data", i);
+        tb.clock();
+    }
+    tb.set("wr_en", 0);
+
+    tb.expect("full", 1);
+    tb.expect("count", 16);
+}
+
+#[test]
+fn test_fifo_simultaneous_rw() {
+    let mut tb = Testbench::new("FIFO");
+    tb.reset(2);
+
+    // Pre-fill with one entry
+    tb.set("wr_en", 1);
+    tb.set("wr_data", 0x11);
+    tb.clock();
+    tb.set("wr_en", 0);
+
+    // Simultaneous read and write
+    tb.set("wr_en", 1);
+    tb.set("wr_data", 0x22);
+    tb.set("rd_en", 1);
+    tb.clock();
+    tb.set("wr_en", 0);
+    tb.set("rd_en", 0);
+
+    // Count should remain 1 (one in, one out)
+    tb.expect("count", 1);
+}
+```
+
+### UartBuffered
+
+```rust
+#[test]
+fn test_uart_buffered_rx_to_fifo() {
+    let mut tb = Testbench::new("UartBuffered");
+    tb.reset(2);
+    tb.set("rx", 1);
+    tb.run(10);
+
+    // Drive a byte onto the RX pin
+    drive_rx_byte(&mut tb, 0xA3);
+    tb.run(5);
+
+    // RX FIFO should have data
+    tb.expect("rx_empty", 0);
+    tb.expect("rx_count", 1);
+
+    // Read and verify
+    tb.set("rx_read", 1);
+    tb.clock();
+    let received = tb.get("rx_data_out");
+    tb.set("rx_read", 0);
+
+    assert_eq!(received, 0xA3);
+}
+```
+
+Run with:
+
+```bash
+skalp test
+```
+
+**Exercise:** Write a `test_fifo_pointer_wrap` test that writes and reads 20 entries (more than the FIFO depth of 16) to verify the circular buffer pointers wrap correctly.
+
+---
+
 ## Quick Reference
 
 | Concept | Syntax | Example |

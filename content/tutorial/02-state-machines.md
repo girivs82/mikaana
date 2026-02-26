@@ -402,6 +402,99 @@ Inspect `build/uart_tx.sv`. You will see a standard SystemVerilog module with `a
 
 ---
 
+## Testing Your Design
+
+State machines are notoriously error-prone — off-by-one timer values, missing transitions, wrong initial states. A testbench catches these issues before they reach hardware. The basic testing pattern is `set()` inputs, `clock()` or `run()` forward, then `expect()` outputs.
+
+Here are tests for the two entities in this chapter (from `tests/ch02_test.rs`):
+
+### TrafficLight
+
+```rust
+use skalp_test::Testbench;
+
+#[test]
+fn test_traffic_light_initial_state() {
+    let mut tb = Testbench::new("TrafficLight");
+    tb.reset(2);
+
+    // After reset, should start in Red state
+    tb.expect("red", 1);
+    tb.expect("yellow", 0);
+    tb.expect("green", 0);
+}
+
+#[test]
+fn test_traffic_light_full_cycle() {
+    let mut tb = Testbench::new("TrafficLight");
+    tb.reset(2);
+
+    // Should be in Red initially
+    tb.expect("red", 1);
+
+    // Run through Red duration (1001 cycles: 1000 countdown + 1 transition)
+    tb.run(1001);
+
+    // Should now be in Green (Red -> Green transition)
+    tb.expect("red", 0);
+    tb.expect("green", 1);
+    tb.expect("yellow", 0);
+
+    // Run through Green duration
+    tb.run(801);
+
+    // Should now be in Yellow
+    tb.expect("yellow", 1);
+}
+```
+
+### UartTx
+
+```rust
+#[test]
+fn test_uart_tx_single_byte() {
+    let mut tb = Testbench::new("UartTx");
+    tb.reset(2);
+
+    // Send byte 0x55 (alternating bits)
+    tb.set("tx_data", 0x55);
+    tb.set("tx_start", 1);
+    tb.clock();
+    tb.set("tx_start", 0);
+
+    let captured = capture_tx_bits(&mut tb);
+    assert_eq!(captured, 0x55);
+}
+
+#[test]
+fn test_uart_tx_busy_flag() {
+    let mut tb = Testbench::new("UartTx");
+    tb.reset(2);
+
+    tb.expect("tx_busy", 0);  // idle
+
+    tb.set("tx_data", 0xAA);
+    tb.set("tx_start", 1);
+    tb.clock();
+    tb.set("tx_start", 0);
+
+    tb.expect("tx_busy", 1);  // transmitting
+
+    tb.run(434 * 10 + 100);   // wait for full frame
+    tb.expect("tx_busy", 0);  // done
+}
+```
+
+Run the tests with:
+
+```bash
+skalp test
+```
+
+**Exercise:** Write a `capture_tx_bits` helper function that waits for the start bit, samples 8 data bits at mid-bit points (every 434 cycles), and returns the captured byte. Use it to verify that `0xAA` transmits correctly.
+
+---
+
 ## Quick Reference
 
 | Concept | Syntax | Example |

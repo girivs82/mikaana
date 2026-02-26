@@ -186,6 +186,60 @@ If you see `error: signal 'count_reg' used before declaration`, check that the `
 
 ---
 
+## Testing Your Design
+
+Every hardware design needs a testbench — code that drives inputs and checks outputs. In Chapter 10, we build a complete test suite for the final UART. But you can start testing right now with the `skalp test` framework.
+
+Here is the testbench for the counter from `tests/counter_test.rs`:
+
+```rust
+use skalp_test::Testbench;
+
+#[test]
+fn test_counter_counts() {
+    let mut tb = Testbench::new("Counter");
+    tb.reset(2);
+
+    // Counter should start at 0 after reset
+    tb.expect("count", 0);
+
+    // Enable counting
+    tb.set("enable", 1);
+
+    // Count up from 1 to 10
+    for i in 1..=10 {
+        tb.clock();
+        tb.expect("count", i);
+    }
+}
+
+#[test]
+fn test_counter_overflow() {
+    let mut tb = Testbench::new("Counter");
+    tb.reset(2);
+    tb.set("enable", 1);
+
+    // Run to just before overflow (8-bit counter wraps at 256)
+    tb.run(255);
+    tb.expect("count", 255);
+
+    // One more cycle — should wrap to 0 and assert overflow
+    tb.clock();
+    tb.expect("count", 0);
+    tb.expect("overflow", 1);
+}
+```
+
+The pattern is simple: create a testbench, reset the design, drive inputs with `set()`, advance time with `clock()` or `run()`, and check outputs with `expect()`. Run it with:
+
+```bash
+skalp test
+```
+
+**Exercise:** Add a `test_counter_disable` test that enables counting to 5, disables it for 10 cycles, then verifies the count is still 5.
+
+---
+
 ## Quick Reference
 
 | Concept | Syntax | Example |

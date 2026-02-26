@@ -443,6 +443,92 @@ If you see `error: output 'frame_error' is unused`, you declared an output port 
 
 ---
 
+## Testing Your Design
+
+When an entity has struct-typed ports, the test API *flattens* them. A port `config: UartConfig` becomes individual signals: `config_baud_divider`, `config_data_bits`, etc. Similarly, `status: UartStatus` becomes `status_tx_busy`, `status_frame_error`, and so on. The naming convention is `portname_fieldname`.
+
+Here are tests from `tests/ch06_test.rs`:
+
+### ColorMixer
+
+```rust
+#[test]
+fn test_color_mixer_all_a() {
+    let mut tb = Testbench::new("ColorMixer");
+    tb.reset(2);
+
+    // mix_factor = 0 -> output entirely color_a
+    tb.set("color_a_r", 255);
+    tb.set("color_a_g", 128);
+    tb.set("color_a_b", 64);
+    tb.set("color_b_r", 0);
+    tb.set("color_b_g", 0);
+    tb.set("color_b_b", 0);
+    tb.set("mix_factor", 0);
+    tb.clock();
+
+    // Integer arithmetic loses a bit of precision:
+    // (255 * 255) >> 8 = 254
+    let r = tb.get("result_r");
+    assert!(r >= 253, "Red channel should be ~255, got {}", r);
+}
+
+#[test]
+fn test_color_mixer_midpoint() {
+    let mut tb = Testbench::new("ColorMixer");
+    tb.reset(2);
+
+    tb.set("color_a_r", 200);
+    tb.set("color_a_g", 0);
+    tb.set("color_a_b", 0);
+    tb.set("color_b_r", 0);
+    tb.set("color_b_g", 200);
+    tb.set("color_b_b", 0);
+    tb.set("mix_factor", 128); // 50/50 blend
+    tb.clock();
+
+    let r = tb.get("result_r");
+    let g = tb.get("result_g");
+    assert!(r >= 95 && r <= 105, "Red ~100, got {}", r);
+    assert!(g >= 95 && g <= 105, "Green ~100, got {}", g);
+}
+```
+
+### UartTop (struct status)
+
+```rust
+#[test]
+fn test_uart_top_struct_status() {
+    let mut tb = Testbench::new("UartTop");
+    tb.reset(2);
+    tb.set("rx", 1);
+
+    // Configure via flattened struct ports
+    tb.set("config_baud_divider", 434);
+    tb.set("config_data_bits", 8);
+    tb.set("config_parity_enable", 0);
+    tb.set("config_stop_bits", 1);
+
+    // Check status struct fields after reset
+    tb.expect("status_tx_busy", 0);
+    tb.expect("status_tx_fifo_full", 0);
+    tb.expect("status_tx_fifo_empty", 1);
+    tb.expect("status_rx_fifo_empty", 1);
+    tb.expect("status_frame_error", 0);
+    tb.expect("status_overrun_error", 0);
+}
+```
+
+Run with:
+
+```bash
+skalp test
+```
+
+**Exercise:** Write a `test_color_mixer_all_b` test that sets `mix_factor` to 255 and verifies the output matches `color_b`.
+
+---
+
 ## Quick Reference
 
 | Concept | Syntax | Example |

@@ -546,6 +546,95 @@ Open both VCD files in a waveform viewer. The waveforms will look identical in s
 
 ---
 
+## Testing Your Design
+
+Parameterized designs demand boundary testing — what happens at the minimum and maximum values the parameter allows? For an 8-bit adder, that means testing carry propagation through all 8 bits and verifying overflow behavior.
+
+Here are tests from `tests/ch05_test.rs`:
+
+### Adder
+
+```rust
+#[test]
+fn test_adder_basic() {
+    let mut tb = Testbench::new("Adder");
+    tb.reset(2);
+
+    tb.set("a", 10);
+    tb.set("b", 20);
+    tb.set("carry_in", 0);
+    tb.clock();
+
+    tb.expect("sum", 30);
+    tb.expect("carry_out", 0);
+}
+
+#[test]
+fn test_adder_overflow() {
+    let mut tb = Testbench::new("Adder");
+    tb.reset(2);
+
+    // 200 + 100 = 300, which overflows 8 bits (300 - 256 = 44)
+    tb.set("a", 200);
+    tb.set("b", 100);
+    tb.set("carry_in", 0);
+    tb.clock();
+
+    tb.expect("sum", 44);      // 300 & 0xFF
+    tb.expect("carry_out", 1); // overflow
+}
+
+#[test]
+fn test_adder_max_values() {
+    let mut tb = Testbench::new("Adder");
+    tb.reset(2);
+
+    // 255 + 255 + 1 = 511 = 0x1FF
+    tb.set("a", 255);
+    tb.set("b", 255);
+    tb.set("carry_in", 1);
+    tb.clock();
+
+    tb.expect("sum", 255);     // 511 & 0xFF
+    tb.expect("carry_out", 1); // overflow
+}
+```
+
+### UartTop (parameterized)
+
+```rust
+#[test]
+fn test_uart_parameterized_tx_rx() {
+    let mut tb = Testbench::new("UartTop");
+    tb.reset(2);
+    tb.set("rx_serial", 1);
+
+    // TX: write a byte and capture it
+    write_tx_byte(&mut tb, 0x55);
+    let captured = capture_tx_byte(&mut tb);
+    assert_eq!(captured, 0x55);
+
+    // RX: drive a byte and read from FIFO
+    drive_rx_byte(&mut tb, 0xA3);
+    tb.run(5);
+
+    tb.set("rx_read", 1);
+    tb.clock();
+    let received = tb.get("rx_data") as u8;
+    assert_eq!(received, 0xA3);
+}
+```
+
+Run with:
+
+```bash
+skalp test
+```
+
+**Exercise:** Write a `test_adder_with_carry` test that verifies `carry_in` is correctly added to the sum (10 + 20 + 1 = 31).
+
+---
+
 ## Quick Reference
 
 | Concept | Syntax | Example |

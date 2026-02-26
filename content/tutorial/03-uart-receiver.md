@@ -465,6 +465,101 @@ Try sending several different byte values (0x00, 0xFF, 0xA5, 0x55) to verify the
 
 ---
 
+## Testing Your Design
+
+Testing a receiver requires *driving* the protocol from the test — you become the transmitting device. A helper function abstracts the UART protocol so each test stays focused on what it verifies.
+
+Here is the helper and representative tests from `tests/ch03_test.rs`:
+
+### Protocol helper
+
+```rust
+const CYCLES_PER_BIT: u64 = 434;
+
+/// Drive a byte onto a serial input pin, simulating an external sender.
+fn drive_rx_byte(tb: &mut Testbench, port: &str, byte: u8) {
+    // Start bit
+    tb.set(port, 0);
+    tb.run(CYCLES_PER_BIT);
+
+    // Data bits, LSB first
+    for i in 0..8 {
+        let bit_val = (byte >> i) & 1;
+        tb.set(port, bit_val as u64);
+        tb.run(CYCLES_PER_BIT);
+    }
+
+    // Stop bit
+    tb.set(port, 1);
+    tb.run(CYCLES_PER_BIT);
+}
+```
+
+### UartRx
+
+```rust
+#[test]
+fn test_uart_rx_single_byte() {
+    let mut tb = Testbench::new("UartRx");
+    tb.reset(2);
+    tb.set("rx", 1); // idle
+    tb.run(10);
+
+    drive_rx_byte(&mut tb, "rx", 0xA3);
+    tb.run(5);
+
+    tb.expect("rx_data", 0xA3);
+}
+
+#[test]
+fn test_uart_rx_false_start() {
+    let mut tb = Testbench::new("UartRx");
+    tb.reset(2);
+    tb.set("rx", 1);
+    tb.run(10);
+
+    // Pull low briefly then back high before mid-bit sample
+    tb.set("rx", 0);
+    tb.run(100); // less than HALF_BIT (217)
+    tb.set("rx", 1);
+    tb.run(500);
+
+    // No byte should have been received
+    tb.expect("rx_valid", 0);
+}
+```
+
+### UartLoopback
+
+```rust
+#[test]
+fn test_loopback_single_byte() {
+    let mut tb = Testbench::new("UartLoopback");
+    tb.reset(2);
+
+    tb.set("send_data", 0x42);
+    tb.set("send_en", 1);
+    tb.clock();
+    tb.set("send_en", 0);
+
+    // Wait for full frame to transit TX -> wire -> RX
+    tb.run(CYCLES_PER_BIT * 10 + 200);
+
+    tb.expect("recv_data", 0x42);
+    tb.expect("recv_valid", 1);
+}
+```
+
+Run with:
+
+```bash
+skalp test
+```
+
+**Exercise:** Write a `test_uart_rx_edge_cases` test that sends `0x00` (all zeros) and `0xFF` (all ones) to verify the receiver handles bit patterns that blend with the start and stop bits.
+
+---
+
 ## Quick Reference
 
 | Concept | Syntax | Example |

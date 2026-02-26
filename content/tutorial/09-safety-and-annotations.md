@@ -815,6 +815,100 @@ This flips a random bit in `state_a` at a random cycle across 1000 simulation ru
 
 ---
 
+## Testing Your Design
+
+Safety-critical designs need two levels of testing. First, verify the design works correctly during normal operation — all detection signals should stay quiet. Second, inject faults at the protocol level and verify the detection signals fire. This mirrors the functional safety V-model: validate the safety mechanism works before trusting it in the FMEDA.
+
+Here are tests from `tests/ch09_test.rs`:
+
+### TmrCounter — normal operation
+
+```rust
+#[test]
+fn test_tmr_counter_no_errors() {
+    let mut tb = Testbench::new("TmrCounter");
+    tb.reset(2);
+
+    // Run for a long time — tmr_error should never fire
+    // during normal (fault-free) operation
+    tb.set("enable", 1);
+    tb.run(1000);
+
+    tb.expect("tmr_error", 0);
+}
+```
+
+### UartRx — parity and frame errors
+
+```rust
+#[test]
+fn test_rx_safety_parity_error() {
+    let mut tb = Testbench::new("UartRx");
+    tb.reset(2);
+    tb.set("rx_serial", 1);
+
+    // Expect odd parity
+    tb.set("expected_parity", 1);
+    tb.run(10);
+
+    // Send 0x55 (4 ones -> even parity = 0, but we expect 1)
+    drive_rx_byte_safety(&mut tb, 0x55);
+    tb.run(5);
+
+    tb.expect("rx_data", 0x55);
+    tb.expect("parity_error", 1); // mismatch detected
+}
+
+#[test]
+fn test_rx_safety_frame_error() {
+    let mut tb = Testbench::new("UartRx");
+    tb.reset(2);
+    tb.set("rx_serial", 1);
+    tb.set("expected_parity", 0);
+    tb.run(10);
+
+    // Drive a byte with corrupted stop bit (low instead of high)
+    drive_rx_byte_frame_error(&mut tb, 0x42);
+    tb.run(5);
+
+    tb.expect("frame_error", 1);
+}
+```
+
+### UartTop — overrun detection
+
+```rust
+#[test]
+fn test_top_safety_overrun() {
+    let mut tb = Testbench::new("UartTop");
+    tb.reset(2);
+    tb.set("rx_serial", 1);
+    tb.run(10);
+
+    // Fill the RX FIFO (depth 16) without reading
+    for i in 0..16 {
+        drive_rx_byte_top(&mut tb, i as u8);
+    }
+    tb.run(5);
+
+    // Next byte causes overrun
+    drive_rx_byte_top(&mut tb, 0xFF);
+    tb.run(5);
+
+    tb.expect("rx_overrun", 1);
+}
+```
+
+Run with:
+
+```bash
+skalp test
+```
+
+**Exercise:** Write a `test_top_safety_clean` test that transmits and receives a byte through the full UartTop and verifies all four error signals (`tx_fsm_error`, `rx_parity_error`, `rx_frame_error`, `rx_overrun`) remain zero throughout.
+
+---
+
 ## Quick Reference
 
 | Concept | Syntax | Example |
