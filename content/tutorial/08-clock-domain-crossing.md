@@ -785,51 +785,55 @@ Here are tests from `tests/ch08_test.rs`:
 ### Synchronizer
 
 ```rust
-#[test]
-fn test_synchronizer_latency() {
-    let mut tb = Testbench::new("Synchronizer");
-    tb.reset(2);
+use skalp_testing::Testbench;
+
+#[tokio::test]
+async fn test_synchronizer_latency() {
+    let mut tb = Testbench::with_top_module("src/synchronizer.sk", "Synchronizer")
+        .await.unwrap();
+    tb.reset(2).await;
 
     // Drive data_in high
-    tb.set("data_in", 1);
+    tb.set("data_in", 1u8);
 
     // After 1 dst clock: first flop captures, second still 0
-    tb.clock_multi(&[("clk_dst", 1)]);
-    tb.expect("data_out", 0);
+    tb.clock_multi(&[("clk_dst", 1)]).await;
+    tb.expect("data_out", 0u32).await;
 
     // After 2nd clock: pipeline complete — output goes high
-    tb.clock_multi(&[("clk_dst", 1)]);
-    tb.expect("data_out", 1);
+    tb.clock_multi(&[("clk_dst", 1)]).await;
+    tb.expect("data_out", 1u32).await;
 }
 ```
 
 ### AsyncFIFO
 
 ```rust
-#[test]
-fn test_async_fifo_cross_domain() {
-    let mut tb = Testbench::new("AsyncFIFO");
-    tb.reset(2);
+#[tokio::test]
+async fn test_async_fifo_cross_domain() {
+    let mut tb = Testbench::with_top_module("src/async_fifo.sk", "AsyncFIFO")
+        .await.unwrap();
+    tb.reset(2).await;
 
     // Write 4 words at write-clock speed
-    for i in 0..4u64 {
-        tb.set("wr_en", 1);
+    for i in 0..4u32 {
+        tb.set("wr_en", 1u8);
         tb.set("wr_data", i * 10);
-        tb.clock_multi(&[("wr_clk", 1)]);
+        tb.clock_multi(&[("wr_clk", 1)]).await;
     }
-    tb.set("wr_en", 0);
+    tb.set("wr_en", 0u8);
 
     // Wait for synchronizer propagation
-    tb.clock_multi(&[("rd_clk", 4)]);
+    tb.clock_multi(&[("rd_clk", 4)]).await;
 
     // Read all 4 words at read-clock speed
-    for i in 0..4u64 {
-        tb.set("rd_en", 1);
-        tb.clock_multi(&[("rd_clk", 1)]);
-        tb.set("rd_en", 0);
+    for i in 0..4u32 {
+        tb.set("rd_en", 1u8);
+        tb.clock_multi(&[("rd_clk", 1)]).await;
+        tb.set("rd_en", 0u8);
 
-        tb.expect("rd_data", i * 10);
-        tb.clock_multi(&[("rd_clk", 1)]); // idle cycle
+        tb.expect("rd_data", i * 10).await;
+        tb.clock_multi(&[("rd_clk", 1)]).await; // idle cycle
     }
 }
 ```
@@ -837,35 +841,36 @@ fn test_async_fifo_cross_domain() {
 ### UartDualClock
 
 ```rust
-#[test]
-fn test_dual_clock_tx() {
-    let mut tb = Testbench::new("UartDualClock");
-    tb.reset(2);
-    tb.set("rx", 1);
+#[tokio::test]
+async fn test_dual_clock_tx() {
+    let mut tb = Testbench::with_top_module("src/uart_dual_clock.sk", "UartDualClock")
+        .await.unwrap();
+    tb.reset(2).await;
+    tb.set("rx", 1u8);
 
-    tb.set("config_baud_div", 434);
-    tb.set("config_parity_en", 0);
-    tb.set("config_parity_odd", 0);
-    tb.set("config_stop_bits_2", 0);
+    tb.set("config_baud_div", 434u32);
+    tb.set("config_parity_en", 0u8);
+    tb.set("config_parity_odd", 0u8);
+    tb.set("config_stop_bits_2", 0u8);
 
     // Write from system domain
-    tb.set("tx_data", 0x55);
-    tb.set("tx_wr_en", 1);
-    tb.clock_multi(&[("sys_clk", 1)]);
-    tb.set("tx_wr_en", 0);
+    tb.set("tx_data", 0x55u32);
+    tb.set("tx_wr_en", 1u8);
+    tb.clock_multi(&[("sys_clk", 1)]).await;
+    tb.set("tx_wr_en", 0u8);
 
     // Let async FIFO sync and TX engine transmit
-    tb.clock_multi(&[("tx_clk", 4540), ("sys_clk", 100)]);
+    tb.clock_multi(&[("tx_clk", 4540), ("sys_clk", 100)]).await;
 
     // TX line should be idle (high)
-    tb.expect("tx", 1);
+    tb.expect("tx", 1u32).await;
 }
 ```
 
 Run with:
 
 ```bash
-skalp test
+cargo test
 ```
 
 **Exercise:** Write a `test_async_fifo_full_empty` test that fills the FIFO to capacity and verifies the `full` flag, then drains it and verifies `empty`.

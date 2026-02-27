@@ -572,7 +572,7 @@ Open the VCD in GTKWave. The `state` signals now show enum variant names instead
 To test the command parser specifically:
 
 ```bash
-skalp test src/uart_cmd.sk --trace
+cargo test --test ch07_test
 ```
 
 Verify that sending byte `0x00` produces `UartCommand::Reset`, byte `0x01` produces `UartCommand::SetBaud` (and waits for a data byte), and byte `0x42` produces `UartCommand::Unknown`.
@@ -588,77 +588,82 @@ Here are tests from `tests/ch07_test.rs`:
 ### ALU
 
 ```rust
-// AluOp encoding (from alu.sk)
-const ALU_ADD: u64 = 0b000;
-const ALU_SUB: u64 = 0b001;
-const ALU_SHL: u64 = 0b101;
-const ALU_EQ:  u64 = 0b111;
+use skalp_testing::Testbench;
 
-#[test]
-fn test_alu_add() {
-    let mut tb = Testbench::new("Alu");
-    tb.reset(2);
+// AluOp encoding (from alu.sk)
+const ALU_ADD: u32 = 0b000;
+const ALU_SUB: u32 = 0b001;
+const ALU_SHL: u32 = 0b101;
+const ALU_EQ:  u32 = 0b111;
+
+#[tokio::test]
+async fn test_alu_add() {
+    let mut tb = Testbench::with_top_module("src/alu.sk", "Alu")
+        .await.unwrap();
+    tb.reset(2).await;
 
     tb.set("op", ALU_ADD);
-    tb.set("a", 100);
-    tb.set("b", 50);
-    tb.clock();
+    tb.set("a", 100u32);
+    tb.set("b", 50u32);
+    tb.clock(1).await;
 
-    tb.expect("result", 150);
-    tb.expect("zero_flag", 0);
+    tb.expect("result", 150u32).await;
+    tb.expect("zero_flag", 0u32).await;
 }
 
-#[test]
-fn test_alu_zero_flag() {
-    let mut tb = Testbench::new("Alu");
-    tb.reset(2);
+#[tokio::test]
+async fn test_alu_zero_flag() {
+    let mut tb = Testbench::with_top_module("src/alu.sk", "Alu")
+        .await.unwrap();
+    tb.reset(2).await;
 
     // 42 - 42 = 0 -> zero flag set
     tb.set("op", ALU_SUB);
-    tb.set("a", 42);
-    tb.set("b", 42);
-    tb.clock();
+    tb.set("a", 42u32);
+    tb.set("b", 42u32);
+    tb.clock(1).await;
 
-    tb.expect("result", 0);
-    tb.expect("zero_flag", 1);
+    tb.expect("result", 0u32).await;
+    tb.expect("zero_flag", 1u32).await;
 }
 ```
 
 ### UartCommandParser
 
 ```rust
-#[test]
-fn test_cmd_two_byte() {
-    let mut tb = Testbench::new("UartCommandParser");
-    tb.reset(2);
+#[tokio::test]
+async fn test_cmd_two_byte() {
+    let mut tb = Testbench::with_top_module("src/uart_cmd.sk", "UartCommandParser")
+        .await.unwrap();
+    tb.reset(2).await;
 
     // Send SetBaud (requires a data byte)
-    tb.set("rx_data", 0x01); // CMD_SET_BAUD
-    tb.set("rx_valid", 1);
-    tb.clock();
-    tb.set("rx_valid", 0);
-    tb.clock();
+    tb.set("rx_data", 0x01u32); // CMD_SET_BAUD
+    tb.set("rx_valid", 1u8);
+    tb.clock(1).await;
+    tb.set("rx_valid", 0u8);
+    tb.clock(1).await;
 
     // Not valid yet — waiting for data
-    tb.expect("cmd_valid", 0);
+    tb.expect("cmd_valid", 0u32).await;
 
     // Send the data byte
-    tb.set("rx_data", 0x42);
-    tb.set("rx_valid", 1);
-    tb.clock();
-    tb.set("rx_valid", 0);
+    tb.set("rx_data", 0x42u32);
+    tb.set("rx_valid", 1u8);
+    tb.clock(1).await;
+    tb.set("rx_valid", 0u8);
 
     // Command complete
-    tb.expect("cmd_valid", 1);
-    tb.expect("cmd", 0x01); // SetBaud
-    tb.expect("cmd_data", 0x42);
+    tb.expect("cmd_valid", 1u32).await;
+    tb.expect("cmd", 0x01u32).await; // SetBaud
+    tb.expect("cmd_data", 0x42u32).await;
 }
 ```
 
 Run with:
 
 ```bash
-skalp test
+cargo test
 ```
 
 **Exercise:** Write a `test_alu_shift` test that verifies left shift (`1 << 3 = 8`) and right shift (`0x80 >> 4 = 0x08`).

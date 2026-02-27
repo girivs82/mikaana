@@ -555,72 +555,79 @@ Here are tests from `tests/ch05_test.rs`:
 ### Adder
 
 ```rust
-#[test]
-fn test_adder_basic() {
-    let mut tb = Testbench::new("Adder");
-    tb.reset(2);
+use skalp_testing::Testbench;
 
-    tb.set("a", 10);
-    tb.set("b", 20);
-    tb.set("carry_in", 0);
-    tb.clock();
+#[tokio::test]
+async fn test_adder_basic() {
+    let mut tb = Testbench::with_top_module("src/adder.sk", "Adder")
+        .await.unwrap();
+    tb.reset(2).await;
 
-    tb.expect("sum", 30);
-    tb.expect("carry_out", 0);
+    tb.set("a", 10u32);
+    tb.set("b", 20u32);
+    tb.set("carry_in", 0u8);
+    tb.clock(1).await;
+
+    tb.expect("sum", 30u32).await;
+    tb.expect("carry_out", 0u32).await;
 }
 
-#[test]
-fn test_adder_overflow() {
-    let mut tb = Testbench::new("Adder");
-    tb.reset(2);
+#[tokio::test]
+async fn test_adder_overflow() {
+    let mut tb = Testbench::with_top_module("src/adder.sk", "Adder")
+        .await.unwrap();
+    tb.reset(2).await;
 
     // 200 + 100 = 300, which overflows 8 bits (300 - 256 = 44)
-    tb.set("a", 200);
-    tb.set("b", 100);
-    tb.set("carry_in", 0);
-    tb.clock();
+    tb.set("a", 200u32);
+    tb.set("b", 100u32);
+    tb.set("carry_in", 0u8);
+    tb.clock(1).await;
 
-    tb.expect("sum", 44);      // 300 & 0xFF
-    tb.expect("carry_out", 1); // overflow
+    tb.expect("sum", 44u32).await;      // 300 & 0xFF
+    tb.expect("carry_out", 1u32).await;  // overflow
 }
 
-#[test]
-fn test_adder_max_values() {
-    let mut tb = Testbench::new("Adder");
-    tb.reset(2);
+#[tokio::test]
+async fn test_adder_max_values() {
+    let mut tb = Testbench::with_top_module("src/adder.sk", "Adder")
+        .await.unwrap();
+    tb.reset(2).await;
 
     // 255 + 255 + 1 = 511 = 0x1FF
-    tb.set("a", 255);
-    tb.set("b", 255);
-    tb.set("carry_in", 1);
-    tb.clock();
+    tb.set("a", 255u32);
+    tb.set("b", 255u32);
+    tb.set("carry_in", 1u8);
+    tb.clock(1).await;
 
-    tb.expect("sum", 255);     // 511 & 0xFF
-    tb.expect("carry_out", 1); // overflow
+    tb.expect("sum", 255u32).await;     // 511 & 0xFF
+    tb.expect("carry_out", 1u32).await;  // overflow
 }
 ```
 
 ### UartTop (parameterized)
 
 ```rust
-#[test]
-fn test_uart_parameterized_tx_rx() {
-    let mut tb = Testbench::new("UartTop");
-    tb.reset(2);
-    tb.set("rx_serial", 1);
+#[tokio::test]
+async fn test_uart_parameterized_tx_rx() {
+    let mut tb = Testbench::with_top_module("src/uart_top.sk", "UartTop")
+        .await.unwrap();
+    tb.reset(2).await;
+    tb.set("rx", 1u8);
 
     // TX: write a byte and capture it
-    write_tx_byte(&mut tb, 0x55);
-    let captured = capture_tx_byte(&mut tb);
+    write_tx_byte(&mut tb, 0x55).await;
+    let captured = capture_tx_byte(&mut tb).await;
     assert_eq!(captured, 0x55);
 
     // RX: drive a byte and read from FIFO
-    drive_rx_byte(&mut tb, 0xA3);
-    tb.run(5);
+    drive_rx_byte(&mut tb, 0xA3).await;
+    tb.clock(5).await;
 
-    tb.set("rx_read", 1);
-    tb.clock();
-    let received = tb.get("rx_data") as u8;
+    let received = tb.get_u64("rx_data").await as u8;
+    tb.set("rx_read", 1u8);
+    tb.clock(1).await;
+    tb.set("rx_read", 0u8);
     assert_eq!(received, 0xA3);
 }
 ```
@@ -628,7 +635,7 @@ fn test_uart_parameterized_tx_rx() {
 Run with:
 
 ```bash
-skalp test
+cargo test
 ```
 
 **Exercise:** Write a `test_adder_with_carry` test that verifies `carry_in` is correctly added to the sum (10 + 20 + 1 = 31).

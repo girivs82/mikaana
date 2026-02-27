@@ -188,52 +188,54 @@ If you see `error: signal 'count_reg' used before declaration`, check that the `
 
 ## Testing Your Design
 
-Every hardware design needs a testbench — code that drives inputs and checks outputs. In Chapter 10, we build a complete test suite for the final UART. But you can start testing right now with the `skalp test` framework.
+Every hardware design needs a testbench — code that drives inputs and checks outputs. In Chapter 10, we build a complete test suite for the final UART. But you can start testing right now with Rust's built-in test framework.
 
 Here is the testbench for the counter from `tests/counter_test.rs`:
 
 ```rust
-use skalp_test::Testbench;
+use skalp_testing::Testbench;
 
-#[test]
-fn test_counter_counts() {
-    let mut tb = Testbench::new("Counter");
-    tb.reset(2);
+#[tokio::test]
+async fn test_counter_counts() {
+    let mut tb = Testbench::with_top_module("src/counter.sk", "Counter")
+        .await.unwrap();
+    tb.reset(2).await;
 
     // Counter should start at 0 after reset
-    tb.expect("count", 0);
+    tb.expect("count", 0u32).await;
 
     // Enable counting
-    tb.set("enable", 1);
+    tb.set("enable", 1u8);
 
     // Count up from 1 to 10
-    for i in 1..=10 {
-        tb.clock();
-        tb.expect("count", i);
+    for i in 1..=10u32 {
+        tb.clock(1).await;
+        tb.expect("count", i).await;
     }
 }
 
-#[test]
-fn test_counter_overflow() {
-    let mut tb = Testbench::new("Counter");
-    tb.reset(2);
-    tb.set("enable", 1);
+#[tokio::test]
+async fn test_counter_overflow() {
+    let mut tb = Testbench::with_top_module("src/counter.sk", "Counter")
+        .await.unwrap();
+    tb.reset(2).await;
+    tb.set("enable", 1u8);
 
     // Run to just before overflow (8-bit counter wraps at 256)
-    tb.run(255);
-    tb.expect("count", 255);
+    tb.clock(255).await;
+    tb.expect("count", 255u32).await;
 
     // One more cycle — should wrap to 0 and assert overflow
-    tb.clock();
-    tb.expect("count", 0);
-    tb.expect("overflow", 1);
+    tb.clock(1).await;
+    tb.expect("count", 0u32).await;
+    tb.expect("overflow", 1u32).await;
 }
 ```
 
-The pattern is simple: create a testbench, reset the design, drive inputs with `set()`, advance time with `clock()` or `run()`, and check outputs with `expect()`. Run it with:
+The pattern is simple: create a testbench with `Testbench::with_top_module()`, reset the design, drive inputs with `tb.set()`, advance time with `tb.clock(n).await`, and check outputs with `tb.expect().await`. Run it with:
 
 ```bash
-skalp test
+cargo test
 ```
 
 **Exercise:** Add a `test_counter_disable` test that enables counting to 5, disables it for 10 cycles, then verifies the count is still 5.

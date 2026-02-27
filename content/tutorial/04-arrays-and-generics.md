@@ -42,7 +42,6 @@ entity FIFO<const WIDTH: nat = 8, const DEPTH: nat = 16> {
     out rd_data: bit[WIDTH]
     out full:    bit
     out empty:   bit
-    out count:   nat[clog2(DEPTH + 1)]
 }
 ```
 
@@ -50,7 +49,7 @@ There is a lot packed into this declaration. Let us unpack it:
 
 - `<const WIDTH: nat = 8, const DEPTH: nat = 16>` — these are **generic parameters**. `WIDTH` controls how many bits each entry has, `DEPTH` controls how many entries the FIFO can hold. Both have defaults (8 and 16), so you can instantiate a `FIFO` without specifying them and get an 8-bit, 16-deep buffer.
 - `bit[WIDTH]` — the data ports use the generic parameter in their type. When you instantiate `FIFO<32, 64>`, `wr_data` and `rd_data` become 32-bit ports.
-- `nat[clog2(DEPTH + 1)]` — the `count` output uses `clog2()` to compute its width. For a 16-deep FIFO, the count ranges from 0 to 16 (17 possible values), which requires `clog2(17) = 5` bits. For a 64-deep FIFO, it would be `clog2(65) = 7` bits. The type adapts automatically.
+- `clog2()` is used internally for pointer widths (see below). The interface itself is simple: write data, read data, and full/empty status flags.
 
 ### The Implementation
 
@@ -60,15 +59,14 @@ Create `src/fifo.sk`:
 // fifo.sk — parameterized synchronous FIFO with full/empty flags
 
 entity FIFO<const WIDTH: nat = 8, const DEPTH: nat = 16> {
-    in  clk:     clock
-    in  rst:     reset
-    in  wr_en:   bit
-    in  wr_data: bit[WIDTH]
-    in  rd_en:   bit
+    in clk: clock
+    in rst: reset(active_high)
+    in wr_en: bit
+    in wr_data: bit[WIDTH]
+    out full: bit
+    in rd_en: bit
     out rd_data: bit[WIDTH]
-    out full:    bit
-    out empty:   bit
-    out count:   nat[clog2(DEPTH + 1)]
+    out empty: bit
 }
 
 impl FIFO {
@@ -93,86 +91,45 @@ impl FIFO {
     // that's 0..16, which requires 5 bits — one more than the
     // pointer width. This extra bit is how we distinguish "full"
     // from "empty" (both have equal pointers, but different counts).
-    signal elem_count: nat[clog2(DEPTH + 1)]
+    signal count: nat[clog2(DEPTH+1)]
+
+    // Combinational outputs — driven from registered state.
+    // These are always valid and update every cycle based on
+    // the current count.
+    empty = (count == 0)
+    full = (count == DEPTH)
+
+    // Read data is combinational — always shows the element at
+    // the current read pointer, even before rd_en is asserted.
+    rd_data = memory[rd_ptr]
 
     on(clk.rise) {
         if rst {
-            wr_ptr     = 0
-            rd_ptr     = 0
-            elem_count = 0
+            wr_ptr = 0
+            rd_ptr = 0
+            count = 0
         } else {
-            // Handle simultaneous read and write first — this is
-            // a common case when the FIFO is acting as a pipeline
-            // stage, and handling it explicitly avoids a corner
-            // case where we'd incorrectly change the count.
-            if wr_en && !full_flag && rd_en && !empty_flag {
-                // Simultaneous read and write — count stays the same.
-                // We write a new element and read an old one in the
-                // same cycle.
+            // Write path: store data and advance pointer
+            if wr_en && !full {
                 memory[wr_ptr] = wr_data
+                wr_ptr = (wr_ptr + 1) % DEPTH
+            }
 
-                // Advance write pointer with wrap
-                if wr_ptr == DEPTH - 1 {
-                    wr_ptr = 0
-                } else {
-                    wr_ptr = wr_ptr + 1
-                }
+            // Read path: advance pointer (data is combinational)
+            if rd_en && !empty {
+                rd_ptr = (rd_ptr + 1) % DEPTH
+            }
 
-                // Advance read pointer with wrap
-                if rd_ptr == DEPTH - 1 {
-                    rd_ptr = 0
-                } else {
-                    rd_ptr = rd_ptr + 1
-                }
-
-                // elem_count does not change
-
-            } else if wr_en && !full_flag {
-                // Write only — store the data and advance the
-                // write pointer.
-                memory[wr_ptr] = wr_data
-
-                if wr_ptr == DEPTH - 1 {
-                    wr_ptr = 0
-                } else {
-                    wr_ptr = wr_ptr + 1
-                }
-
-                elem_count = elem_count + 1
-
-            } else if rd_en && !empty_flag {
-                // Read only — advance the read pointer.
-                // The data is already available on rd_data
-                // (driven combinationally below).
-                if rd_ptr == DEPTH - 1 {
-                    rd_ptr = 0
-                } else {
-                    rd_ptr = rd_ptr + 1
-                }
-
-                elem_count = elem_count - 1
+            // Count tracking: increment on write-only, decrement
+            // on read-only. Simultaneous read+write leaves count
+            // unchanged because neither condition is true.
+            if wr_en && !rd_en && !full {
+                count = count + 1
+            } else if !wr_en && rd_en && !empty {
+                count = count - 1
             }
         }
     }
-
-    // Combinational outputs — these are always valid, driven from
-    // registered state. Forward references to full_flag and empty_flag
-    // work because skalp resolves combinational dependencies.
-    //
-    // These signals are used both inside the on block (to guard
-    // writes and reads) and outside (to drive the output ports).
-
-    signal full_flag:  bit
-    signal empty_flag: bit
-
-    full_flag  = elem_count == DEPTH
-    empty_flag = elem_count == 0
-
-    // Output ports
-    full    = full_flag
-    empty   = empty_flag
-    count   = elem_count
-    rd_data = memory[rd_ptr]
 }
 ```
 
@@ -182,7 +139,7 @@ Let us examine each key feature in detail.
 
 **Generic parameters.** The `<const WIDTH: nat = 8, const DEPTH: nat = 16>` syntax declares two compile-time constants with defaults. When you instantiate the FIFO, you can override either or both. The compiler substitutes the values before synthesis, producing specialised hardware — there is no runtime cost. A `FIFO<8, 16>` produces a design with an 8-bit-wide, 16-deep memory. A `FIFO<32, 256>` produces a completely different design with a 32-bit-wide, 256-deep memory and wider pointers.
 
-Generic parameters in skalp are true type-level constants. They can appear in type expressions (`bit[WIDTH]`), in `clog2()` arguments, in comparison values (`DEPTH - 1`), and anywhere else a compile-time constant is valid. The compiler evaluates all generic expressions at compile time and checks that the resulting types are consistent.
+Generic parameters in skalp are true type-level constants. They can appear in type expressions (`bit[WIDTH]`), in `clog2()` arguments, in comparison values (`DEPTH`), and anywhere else a compile-time constant is valid. The compiler evaluates all generic expressions at compile time and checks that the resulting types are consistent.
 
 **Array type.** `[bit[WIDTH]; DEPTH]` is an array of `DEPTH` elements, each of type `bit[WIDTH]`. The syntax reads as "an array of DEPTH things of type bit[WIDTH]." This maps to a register file or block RAM depending on the synthesis target and the array size.
 
@@ -202,15 +159,15 @@ Arrays in skalp are fixed-size. The size is a compile-time constant (it can use 
 
 The result of `clog2()` is used directly in type declarations like `nat[clog2(DEPTH)]` — the pointer width adapts automatically to the FIFO depth. You never need to manually compute the width or define a separate constant for it.
 
-**Pointer wrapping.** Instead of relying on power-of-two depths and bitmask tricks (a common SV pattern), this FIFO uses explicit comparison: `if wr_ptr == DEPTH - 1 { wr_ptr = 0 } else { wr_ptr = wr_ptr + 1 }`. This works for any depth, not just powers of two — you can have a 17-deep or 100-deep FIFO.
+**Pointer wrapping with modulo.** The expression `(wr_ptr + 1) % DEPTH` advances the pointer and wraps it back to 0 when it reaches the end. For a 16-deep FIFO, when `wr_ptr` is 15, `(15 + 1) % 16 = 0`. This works for any depth, not just powers of two — you can have a 17-deep or 100-deep FIFO.
 
-For power-of-two depths, the synthesiser recognises this pattern and optimises it to a simple bit truncation, producing the same hardware as the bitmask approach. For non-power-of-two depths, it generates a comparator and mux, which is exactly what you need.
+For power-of-two depths, the synthesiser recognises the modulo operation and optimises it to simple bit truncation, producing the same hardware as a bitmask approach. For non-power-of-two depths, it generates a comparator and mux.
 
-**Forward references.** Notice that `full_flag` and `empty_flag` are used inside the `on` block (in the guard conditions `!full_flag` and `!empty_flag`) but defined and assigned *below* the `on` block. This is legal in skalp: combinational signals can be referenced before their assignment. The compiler builds a dependency graph and resolves the order.
+**Combinational read.** The line `rd_data = memory[rd_ptr]` is a combinational assignment outside the `on` block. This means `rd_data` always shows the element at the current read pointer, even before `rd_en` is asserted. When `rd_en` pulses, the `on` block advances `rd_ptr`, and `rd_data` combinationally updates to show the next element on the following cycle. This "read-before-advance" protocol is simple and efficient.
 
-This is one of skalp's most convenient features for code organisation. You can group all the sequential logic in one block and all the combinational outputs below it, without worrying about declaration order. The compiler ensures there are no true combinational loops (those are errors), but forward references to signals that are eventually assigned are perfectly fine.
+**Forward references.** Notice that `full` and `empty` are used inside the `on` block (in the guard conditions `!full` and `!empty`) but the combinational assignments `full = (count == DEPTH)` and `empty = (count == 0)` appear *above* the `on` block. The position does not matter — skalp resolves the dependency graph regardless of textual order. You can organise your code logically without fighting the language.
 
-**Simultaneous read and write.** The FIFO explicitly handles the case where both `wr_en` and `rd_en` are asserted in the same cycle. This is important: if the FIFO is used as a pipeline stage, the upstream may be writing while the downstream is reading. Without explicit handling, the count would incorrectly increment (from the write) and decrement (from the read) in the same cycle. By checking for the simultaneous case first, we keep the count unchanged and simply advance both pointers.
+**Simultaneous read and write.** When both `wr_en` and `rd_en` are asserted in the same cycle, both the write and read paths execute independently. Both pointers advance. The count update logic handles this implicitly: `wr_en && !rd_en` is false and `!wr_en && rd_en` is also false, so the count stays unchanged. This is correct — one element in, one element out, net change is zero. No explicit simultaneous-case handler is needed.
 
 ---
 
@@ -251,6 +208,10 @@ Create `src/uart_buffered.sk`:
 ```skalp
 // uart_buffered.sk — UART with TX and RX FIFOs
 
+use fifo::FIFO;
+use uart_tx::UartTx;
+use uart_rx::UartRx;
+
 entity UartBuffered {
     in  clk:          clock
     in  rst:          reset
@@ -268,10 +229,6 @@ entity UartBuffered {
     // Serial pins
     out tx:           bit
     in  rx:           bit
-
-    // Status
-    out tx_count:     nat[5]
-    out rx_count:     nat[5]
 }
 
 impl UartBuffered {
@@ -294,12 +251,12 @@ impl UartBuffered {
         rst:     rst,
         wr_en:   tx_write,
         wr_data: tx_data_in,
-        rd_en:   tx_fifo_read,
-        rd_data: tx_fifo_data,
-        full:    tx_full,
-        empty:   tx_fifo_empty,
-        count:   tx_count
+        rd_en:   tx_fifo_read
     }
+
+    tx_fifo_data  = tx_fifo.rd_data
+    tx_full       = tx_fifo.full
+    tx_fifo_empty = tx_fifo.empty
 
     // RX FIFO: 8 bits wide, 16 entries deep.
     // The UART RX writes into this FIFO when a byte is received,
@@ -309,12 +266,12 @@ impl UartBuffered {
         rst:     rst,
         wr_en:   rx_valid && !rx_fifo_full,
         wr_data: rx_byte,
-        rd_en:   rx_read,
-        rd_data: rx_data_out,
-        full:    rx_fifo_full,
-        empty:   rx_empty,
-        count:   rx_count
+        rd_en:   rx_read
     }
+
+    rx_data_out  = rx_fifo.rd_data
+    rx_fifo_full = rx_fifo.full
+    rx_empty     = rx_fifo.empty
 
     // UART transmitter — reads from the TX FIFO.
     // tx_fifo_read serves as both the FIFO read enable and the
@@ -324,10 +281,11 @@ impl UartBuffered {
         clk:      clk,
         rst:      rst,
         tx_data:  tx_fifo_data,
-        tx_start: tx_fifo_read,
-        tx:       tx,
-        tx_busy:  tx_busy
+        tx_start: tx_fifo_read
     }
+
+    tx = uart_tx.tx
+    tx_busy = uart_tx.tx_busy
 
     // UART receiver — writes to the RX FIFO.
     // When rx_valid pulses, the byte on rx_byte is captured by
@@ -335,10 +293,11 @@ impl UartBuffered {
     let uart_rx = UartRx {
         clk:      clk,
         rst:      rst,
-        rx:       rx,
-        rx_data:  rx_byte,
-        rx_valid: rx_valid
+        rx:       rx
     }
+
+    rx_byte  = uart_rx.rx_data
+    rx_valid = uart_rx.rx_valid
 
     // TX FIFO read controller: pop a byte when the transmitter
     // is idle and the FIFO has data. This single combinational
@@ -350,7 +309,7 @@ impl UartBuffered {
 
 ### How the Pieces Fit Together
 
-**TX path.** The application asserts `tx_write` with `tx_data_in` to push a byte into the TX FIFO. The combinational expression `tx_fifo_read = !tx_fifo_empty && !tx_busy` automatically triggers a read from the FIFO whenever the transmitter is idle and data is available. The FIFO's `rd_data` output feeds directly into `UartTx`'s `tx_data` port, and `tx_fifo_read` serves double duty as the transmitter's `tx_en` — starting transmission of the byte in the same cycle it is read from the FIFO.
+**TX path.** The application asserts `tx_write` with `tx_data_in` to push a byte into the TX FIFO. The combinational expression `tx_fifo_read = !tx_fifo_empty && !tx_busy` automatically triggers a read from the FIFO whenever the transmitter is idle and data is available. The FIFO's `rd_data` output (accessed via `tx_fifo.rd_data`) feeds into `UartTx`'s `tx_data` port through the `tx_fifo_data` signal, and `tx_fifo_read` serves double duty as the transmitter's `tx_start` — starting transmission of the byte in the same cycle it is read from the FIFO.
 
 This means bytes flow through the system automatically: the application pushes them into the FIFO, and the transmitter pulls them out one at a time as fast as the baud rate allows. The application never needs to check whether the transmitter is busy — it just writes to the FIFO and checks `tx_full` to avoid overflow.
 
@@ -358,7 +317,7 @@ This means bytes flow through the system automatically: the application pushes t
 
 The application reads bytes out by asserting `rx_read`, and checks `rx_empty` to know whether data is available. The FIFO's `rd_data` output always holds the oldest unread byte.
 
-**Status signals.** The `tx_count` and `rx_count` outputs expose how many bytes are in each FIFO. These are useful for flow control (e.g., stop accepting data when the TX FIFO is more than 75% full) or for diagnostics (a debugger can read the FIFO depth to understand system behaviour).
+**Output access with dot notation.** Sub-entity outputs are accessed with `instance.port` syntax: `tx_fifo.rd_data`, `uart_tx.tx`, `uart_rx.rx_data`. These are wired to internal signals or output ports with combinational assignments. This keeps the `let` bindings focused on input connections and puts the output wiring in explicit, readable assignments.
 
 **The glue line.** The most important line in the entire module is the last one:
 
@@ -390,10 +349,10 @@ Each instantiation produces distinct hardware. `FIFO<8, 16>` and `FIFO<32, 64>` 
 You might wonder why the FIFO uses a separate `elem_count` register instead of deriving fullness from the pointer difference (`wr_ptr - rd_ptr`). Both approaches work, but they have different trade-offs:
 
 **Count-based** (our approach):
-- Extra register (`elem_count`), costs `clog2(DEPTH + 1)` flip-flops
+- Extra register (`count`), costs `clog2(DEPTH + 1)` flip-flops
 - Full and empty are simple comparisons: `count == DEPTH`, `count == 0`
 - Works for any DEPTH, not just powers of two
-- The count output is directly available — no additional logic
+- The count value is directly available for diagnostics if needed
 
 **Pointer-difference:**
 - No extra register — derive count from `wr_ptr - rd_ptr`
@@ -422,7 +381,7 @@ skalp build src/uart_buffered.sk
 Run the test suite:
 
 ```bash
-skalp test src/uart_buffered.sk --trace
+cargo test --test ch04_test
 ```
 
 Verify in the waveform viewer:
@@ -446,80 +405,90 @@ Here are representative tests from `tests/ch04_test.rs`:
 ### FIFO
 
 ```rust
-#[test]
-fn test_fifo_empty_after_reset() {
-    let mut tb = Testbench::new("FIFO");
-    tb.reset(2);
+use skalp_testing::Testbench;
 
-    tb.expect("empty", 1);
-    tb.expect("full", 0);
-    tb.expect("count", 0);
+#[tokio::test]
+async fn test_fifo_empty_after_reset() {
+    let mut tb = Testbench::with_top_module("src/fifo.sk", "FIFO")
+        .await.unwrap();
+    tb.reset(2).await;
+
+    tb.expect("empty", 1u32).await;
+    tb.expect("full", 0u32).await;
 }
 
-#[test]
-fn test_fifo_full_flag() {
-    let mut tb = Testbench::new("FIFO");
-    tb.reset(2);
+#[tokio::test]
+async fn test_fifo_write_and_read_ordering() {
+    let mut tb = Testbench::with_top_module("src/fifo.sk", "FIFO")
+        .await.unwrap();
+    tb.reset(2).await;
+
+    // Write 5 bytes: "Hello"
+    let test_data: [u8; 5] = [0x48, 0x65, 0x6C, 0x6C, 0x6F];
+    for &byte in &test_data {
+        tb.set("wr_en", 1u8);
+        tb.set("wr_data", byte as u32);
+        tb.clock(1).await;
+    }
+    tb.set("wr_en", 0u8);
+
+    // Read them back — FIFO should preserve order
+    // rd_data is combinational: valid before pulsing rd_en
+    for (i, &expected) in test_data.iter().enumerate() {
+        let rd_data = tb.get_u64("rd_data").await;
+        assert_eq!(rd_data, expected as u64,
+            "FIFO byte {}: expected 0x{:02X}, got 0x{:02X}",
+            i, expected, rd_data);
+
+        // Pulse rd_en to advance read pointer
+        tb.set("rd_en", 1u8);
+        tb.clock(1).await;
+        tb.set("rd_en", 0u8);
+    }
+}
+
+#[tokio::test]
+async fn test_fifo_full_flag() {
+    let mut tb = Testbench::with_top_module("src/fifo.sk", "FIFO")
+        .await.unwrap();
+    tb.reset(2).await;
 
     // Write 16 entries (default DEPTH = 16)
-    for i in 0..16u64 {
-        tb.set("wr_en", 1);
+    for i in 0..16u32 {
+        tb.set("wr_en", 1u8);
         tb.set("wr_data", i);
-        tb.clock();
+        tb.clock(1).await;
     }
-    tb.set("wr_en", 0);
+    tb.set("wr_en", 0u8);
 
-    tb.expect("full", 1);
-    tb.expect("count", 16);
-}
-
-#[test]
-fn test_fifo_simultaneous_rw() {
-    let mut tb = Testbench::new("FIFO");
-    tb.reset(2);
-
-    // Pre-fill with one entry
-    tb.set("wr_en", 1);
-    tb.set("wr_data", 0x11);
-    tb.clock();
-    tb.set("wr_en", 0);
-
-    // Simultaneous read and write
-    tb.set("wr_en", 1);
-    tb.set("wr_data", 0x22);
-    tb.set("rd_en", 1);
-    tb.clock();
-    tb.set("wr_en", 0);
-    tb.set("rd_en", 0);
-
-    // Count should remain 1 (one in, one out)
-    tb.expect("count", 1);
+    tb.expect("full", 1u32).await;
+    tb.expect("empty", 0u32).await;
 }
 ```
 
 ### UartBuffered
 
 ```rust
-#[test]
-fn test_uart_buffered_rx_to_fifo() {
-    let mut tb = Testbench::new("UartBuffered");
-    tb.reset(2);
-    tb.set("rx", 1);
-    tb.run(10);
+#[tokio::test]
+async fn test_uart_buffered_rx_to_fifo() {
+    let mut tb = Testbench::with_top_module("src/uart_buffered.sk", "UartBuffered")
+        .await.unwrap();
+    tb.reset(2).await;
+    tb.set("rx", 1u8);
+    tb.clock(10).await;
 
     // Drive a byte onto the RX pin
-    drive_rx_byte(&mut tb, 0xA3);
-    tb.run(5);
+    drive_rx_byte(&mut tb, 0xA3).await;
+    tb.clock(5).await;
 
     // RX FIFO should have data
-    tb.expect("rx_empty", 0);
-    tb.expect("rx_count", 1);
+    tb.expect("rx_empty", 0u32).await;
 
-    // Read and verify
-    tb.set("rx_read", 1);
-    tb.clock();
-    let received = tb.get("rx_data_out");
-    tb.set("rx_read", 0);
+    // rd_data is combinational — read before pulsing rd_en
+    let received = tb.get_u64("rx_data_out").await;
+    tb.set("rx_read", 1u8);
+    tb.clock(1).await;
+    tb.set("rx_read", 0u8);
 
     assert_eq!(received, 0xA3);
 }
@@ -528,7 +497,7 @@ fn test_uart_buffered_rx_to_fifo() {
 Run with:
 
 ```bash
-skalp test
+cargo test
 ```
 
 **Exercise:** Write a `test_fifo_pointer_wrap` test that writes and reads 20 entries (more than the FIFO depth of 16) to verify the circular buffer pointers wrap correctly.
@@ -546,8 +515,9 @@ skalp test
 | Generic instantiation | `Entity<args>` | `FIFO<8, 16> { ... }` |
 | Compile-time log2 | `clog2(expr)` | `nat[clog2(DEPTH)]` |
 | Pointer width from depth | `nat[clog2(N)]` | `signal wr_ptr: nat[clog2(DEPTH)]` |
-| Count width (extra bit) | `nat[clog2(N + 1)]` | `signal elem_count: nat[clog2(DEPTH + 1)]` |
-| Forward reference | Use before assign (combinational) | `full_flag` used in `on`, assigned below |
+| Count width (extra bit) | `nat[clog2(N + 1)]` | `signal count: nat[clog2(DEPTH + 1)]` |
+| Modulo pointer wrap | `(ptr + 1) % DEPTH` | `wr_ptr = (wr_ptr + 1) % DEPTH` |
+| Forward reference | Use before assign (combinational) | `full` used in `on`, assigned above |
 | Default generic values | Omit args to use defaults | `FIFO { ... }` uses WIDTH=8, DEPTH=16 |
 
 ---

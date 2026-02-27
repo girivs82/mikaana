@@ -824,85 +824,91 @@ Here are tests from `tests/ch09_test.rs`:
 ### TmrCounter — normal operation
 
 ```rust
-#[test]
-fn test_tmr_counter_no_errors() {
-    let mut tb = Testbench::new("TmrCounter");
-    tb.reset(2);
+use skalp_testing::Testbench;
+
+#[tokio::test]
+async fn test_tmr_counter_no_errors() {
+    let mut tb = Testbench::with_top_module("src/tmr_counter.sk", "TmrCounter")
+        .await.unwrap();
+    tb.reset(2).await;
 
     // Run for a long time — tmr_error should never fire
     // during normal (fault-free) operation
-    tb.set("enable", 1);
-    tb.run(1000);
+    tb.set("enable", 1u8);
+    tb.clock(1000).await;
 
-    tb.expect("tmr_error", 0);
+    tb.expect("tmr_error", 0u32).await;
 }
 ```
 
 ### UartRx — parity and frame errors
 
 ```rust
-#[test]
-fn test_rx_safety_parity_error() {
-    let mut tb = Testbench::new("UartRx");
-    tb.reset(2);
-    tb.set("rx_serial", 1);
+#[tokio::test]
+async fn test_rx_safety_parity_error() {
+    let mut tb = Testbench::with_top_module("src/uart_rx.sk", "UartRx")
+        .await.unwrap();
+    tb.reset(2).await;
+    tb.set("rx_serial", 1u8);
 
     // Expect odd parity
-    tb.set("expected_parity", 1);
-    tb.run(10);
+    tb.set("expected_parity", 1u8);
+    tb.clock(10).await;
 
     // Send 0x55 (4 ones -> even parity = 0, but we expect 1)
-    drive_rx_byte_safety(&mut tb, 0x55);
-    tb.run(5);
+    drive_rx_byte_safety(&mut tb, 0x55).await;
+    tb.clock(5).await;
 
-    tb.expect("rx_data", 0x55);
-    tb.expect("parity_error", 1); // mismatch detected
+    tb.expect("rx_data", 0x55u32).await;
+    tb.expect("parity_error", 1u32).await; // mismatch detected
 }
 
-#[test]
-fn test_rx_safety_frame_error() {
-    let mut tb = Testbench::new("UartRx");
-    tb.reset(2);
-    tb.set("rx_serial", 1);
-    tb.set("expected_parity", 0);
-    tb.run(10);
+#[tokio::test]
+async fn test_rx_safety_frame_error() {
+    let mut tb = Testbench::with_top_module("src/uart_rx.sk", "UartRx")
+        .await.unwrap();
+    tb.reset(2).await;
+    tb.set("rx_serial", 1u8);
+    tb.set("expected_parity", 0u8);
+    tb.clock(10).await;
 
     // Drive a byte with corrupted stop bit (low instead of high)
-    drive_rx_byte_frame_error(&mut tb, 0x42);
-    tb.run(5);
+    drive_rx_byte_frame_error(&mut tb, 0x42).await;
+    tb.clock(5).await;
 
-    tb.expect("frame_error", 1);
+    tb.expect("frame_error", 1u32).await;
 }
 ```
 
 ### UartTop — overrun detection
 
 ```rust
-#[test]
-fn test_top_safety_overrun() {
-    let mut tb = Testbench::new("UartTop");
-    tb.reset(2);
-    tb.set("rx_serial", 1);
-    tb.run(10);
+#[tokio::test]
+async fn test_top_safety_overrun() {
+    let mut tb = Testbench::with_top_module("src/uart_top.sk", "UartTop")
+        .await.unwrap();
+    tb.reset(2).await;
+    tb.set("rx", 1u8);
+    tb.clock(10).await;
 
     // Fill the RX FIFO (depth 16) without reading
     for i in 0..16 {
-        drive_rx_byte_top(&mut tb, i as u8);
+        drive_rx_byte(&mut tb, i as u8).await;
     }
-    tb.run(5);
+    tb.clock(5).await;
 
     // Next byte causes overrun
-    drive_rx_byte_top(&mut tb, 0xFF);
-    tb.run(5);
+    drive_rx_byte(&mut tb, 0xFF).await;
+    tb.clock(5).await;
 
-    tb.expect("rx_overrun", 1);
+    tb.expect("rx_overrun", 1u32).await;
 }
 ```
 
 Run with:
 
 ```bash
-skalp test
+cargo test
 ```
 
 **Exercise:** Write a `test_top_safety_clean` test that transmits and receives a byte through the full UartTop and verifies all four error signals (`tx_fsm_error`, `rx_parity_error`, `rx_frame_error`, `rx_overrun`) remain zero throughout.

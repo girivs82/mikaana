@@ -368,6 +368,9 @@ Create `src/uart_loopback.sk`:
 ```skalp
 // uart_loopback.sk — connect TX output to RX input for testing
 
+use uart_tx::UartTx;
+use uart_rx::UartRx;
+
 entity UartLoopback {
     in  clk:        clock
     in  rst:        reset
@@ -389,22 +392,24 @@ impl UartLoopback {
         clk:      clk,
         rst:      rst,
         tx_data:  send_data,
-        tx_start: send_en,
-        tx:       serial_wire,
-        tx_busy:  tx_busy
+        tx_start: send_en
     }
+
+    serial_wire = tx.tx
+    tx_busy = tx.tx_busy
 
     let rx = UartRx {
         clk:      clk,
         rst:      rst,
-        rx:       serial_wire,
-        rx_data:  recv_data,
-        rx_valid: recv_valid
+        rx:       serial_wire
     }
+
+    recv_data  = rx.rx_data
+    recv_valid = rx.rx_valid
 }
 ```
 
-This wires the TX serial output directly to the RX serial input through `serial_wire`. The `let` bindings instantiate the two sub-modules and connect their ports. Notice how clean this is: each port connection is explicit, and the internal `serial_wire` signal provides the channel between the two modules without any external routing.
+This wires the TX serial output directly to the RX serial input through `serial_wire`. The `let` bindings instantiate the two sub-modules, and their outputs are accessed with dot notation (`tx.tx`, `rx.rx_data`). Notice how clean this is: each port connection is explicit, and the internal `serial_wire` signal provides the channel between the two modules without any external routing.
 
 ### Loopback Architecture
 
@@ -445,10 +450,10 @@ Compile the loopback module (requires both TX and RX):
 skalp build src/uart_loopback.sk
 ```
 
-To run a quick simulation, you can use the skalp test runner. We will build a proper testbench in Chapter 10, but for now you can verify basic operation:
+To run a quick simulation, you can compile and test the loopback. We will build a proper testbench in Chapter 10, but for now you can verify basic operation:
 
 ```bash
-skalp test src/uart_loopback.sk --trace
+cargo test --test ch03_test
 ```
 
 This generates a VCD waveform file. Open it in GTKWave or your preferred viewer and check:
@@ -474,86 +479,91 @@ Here is the helper and representative tests from `tests/ch03_test.rs`:
 ### Protocol helper
 
 ```rust
-const CYCLES_PER_BIT: u64 = 434;
+use skalp_testing::Testbench;
+
+const CYCLES_PER_BIT: usize = 434;
 
 /// Drive a byte onto a serial input pin, simulating an external sender.
-fn drive_rx_byte(tb: &mut Testbench, port: &str, byte: u8) {
+async fn drive_rx_byte(tb: &mut Testbench, port: &str, byte: u8) {
     // Start bit
-    tb.set(port, 0);
-    tb.run(CYCLES_PER_BIT);
+    tb.set(port, 0u8);
+    tb.clock(CYCLES_PER_BIT).await;
 
     // Data bits, LSB first
     for i in 0..8 {
-        let bit_val = (byte >> i) & 1;
-        tb.set(port, bit_val as u64);
-        tb.run(CYCLES_PER_BIT);
+        let bit_val = ((byte >> i) & 1) as u8;
+        tb.set(port, bit_val);
+        tb.clock(CYCLES_PER_BIT).await;
     }
 
     // Stop bit
-    tb.set(port, 1);
-    tb.run(CYCLES_PER_BIT);
+    tb.set(port, 1u8);
+    tb.clock(CYCLES_PER_BIT).await;
 }
 ```
 
 ### UartRx
 
 ```rust
-#[test]
-fn test_uart_rx_single_byte() {
-    let mut tb = Testbench::new("UartRx");
-    tb.reset(2);
-    tb.set("rx", 1); // idle
-    tb.run(10);
+#[tokio::test]
+async fn test_uart_rx_single_byte() {
+    let mut tb = Testbench::with_top_module("src/uart_rx.sk", "UartRx")
+        .await.unwrap();
+    tb.reset(2).await;
+    tb.set("rx", 1u8); // idle
+    tb.clock(10).await;
 
-    drive_rx_byte(&mut tb, "rx", 0xA3);
-    tb.run(5);
+    drive_rx_byte(&mut tb, "rx", 0xA3).await;
+    tb.clock(5).await;
 
-    tb.expect("rx_data", 0xA3);
+    tb.expect("rx_data", 0xA3u32).await;
 }
 
-#[test]
-fn test_uart_rx_false_start() {
-    let mut tb = Testbench::new("UartRx");
-    tb.reset(2);
-    tb.set("rx", 1);
-    tb.run(10);
+#[tokio::test]
+async fn test_uart_rx_false_start() {
+    let mut tb = Testbench::with_top_module("src/uart_rx.sk", "UartRx")
+        .await.unwrap();
+    tb.reset(2).await;
+    tb.set("rx", 1u8);
+    tb.clock(10).await;
 
     // Pull low briefly then back high before mid-bit sample
-    tb.set("rx", 0);
-    tb.run(100); // less than HALF_BIT (217)
-    tb.set("rx", 1);
-    tb.run(500);
+    tb.set("rx", 0u8);
+    tb.clock(100).await; // less than HALF_BIT (217)
+    tb.set("rx", 1u8);
+    tb.clock(500).await;
 
     // No byte should have been received
-    tb.expect("rx_valid", 0);
+    tb.expect("rx_valid", 0u32).await;
 }
 ```
 
 ### UartLoopback
 
 ```rust
-#[test]
-fn test_loopback_single_byte() {
-    let mut tb = Testbench::new("UartLoopback");
-    tb.reset(2);
+#[tokio::test]
+async fn test_loopback_single_byte() {
+    let mut tb = Testbench::with_top_module("src/uart_loopback.sk", "UartLoopback")
+        .await.unwrap();
+    tb.reset(2).await;
 
-    tb.set("send_data", 0x42);
-    tb.set("send_en", 1);
-    tb.clock();
-    tb.set("send_en", 0);
+    tb.set("send_data", 0x42u32);
+    tb.set("send_en", 1u8);
+    tb.clock(1).await;
+    tb.set("send_en", 0u8);
 
     // Wait for full frame to transit TX -> wire -> RX
-    tb.run(CYCLES_PER_BIT * 10 + 200);
+    tb.clock(CYCLES_PER_BIT * 10 + 200).await;
 
-    tb.expect("recv_data", 0x42);
-    tb.expect("recv_valid", 1);
+    tb.expect("recv_data", 0x42u32).await;
+    tb.expect("recv_valid", 1u32).await;
 }
 ```
 
 Run with:
 
 ```bash
-skalp test
+cargo test
 ```
 
 **Exercise:** Write a `test_uart_rx_edge_cases` test that sends `0x00` (all zeros) and `0xFF` (all ones) to verify the receiver handles bit patterns that blend with the start and stop bits.

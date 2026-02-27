@@ -153,69 +153,33 @@ Accessing nested fields chains the dots: `foreground.color.r` gives the red chan
 
 ---
 
-## Running Project: UART Configuration and Status Structs
+## Running Project: UART Top-Level Composition
 
-Time to apply structs to the UART. Right now the transmitter and receiver each have a handful of individual control and status signals — baud divider, data bit count, busy flags, error flags. As you add more features, these multiply. Structs let you group them into logical bundles that are easier to connect and reason about.
+Time to bring all the pieces together. `UartTop` instantiates the TX path (FIFO + transmitter) and the RX path (receiver + FIFO), wires them together, and exposes simple status ports. This is the entity you would instantiate in an SoC.
 
-### Defining the Structs
-
-Create a file called `src/uart_types.sk`:
-
-```
-// uart_types.sk — Shared type definitions for the UART peripheral.
-//
-// These structs define the configuration and status interfaces
-// used by UartTop. They are flattened to individual signals
-// at synthesis time.
-
-// UartConfig holds all runtime-configurable parameters.
-// These values can be set by a bus interface or hardwired
-// at the top level — the UART core does not care.
-pub struct UartConfig {
-    baud_divider: nat[16],    // clock cycles per bit (e.g., 434 for 115200 @ 50MHz)
-    data_bits: nat[4],        // number of data bits (5, 6, 7, or 8)
-    parity_enable: bit[1],    // 1 = parity bit transmitted/checked
-    stop_bits: nat[2]         // 1 or 2 stop bits
-}
-
-// UartStatus aggregates all status signals from the UART.
-// A bus interface can read this struct as a status register.
-pub struct UartStatus {
-    tx_busy: bit[1],          // TX FSM is not idle
-    tx_fifo_full: bit[1],     // TX FIFO cannot accept more data
-    tx_fifo_empty: bit[1],    // TX FIFO has no pending data
-    rx_valid: bit[1],         // RX FIFO has data available to read
-    rx_fifo_full: bit[1],     // RX FIFO is full — new data will be lost
-    rx_fifo_empty: bit[1],    // RX FIFO has no data
-    frame_error: bit[1],      // RX detected missing stop bit
-    overrun_error: bit[1]     // RX data arrived while FIFO was full
-}
-```
-
-Notice that `UartConfig` contains fields of different types — `nat[16]`, `nat[4]`, `bit[1]`, `nat[2]`. Structs are not constrained to uniform field types. Each field is independently typed and independently flattened.
+While a production design might group the status signals into a `UartStatus` struct (as the ColorMixer example demonstrates for the `Color` type), we keep the top-level entity simple here with individual ports. The struct-based approach would work identically — structs are purely a source-level grouping mechanism that the compiler flattens to individual signals.
 
 ### Composing the UART Top Level
 
-Now for the hierarchical composition. `UartTop` instantiates the TX path (FIFO + transmitter) and the RX path (receiver + FIFO), wires them together, and exposes struct-based configuration and status ports.
-
 Create a file called `src/uart_top.sk`:
 
-```
+```skalp
 // uart_top.sk — Top-level UART entity.
 //
 // Composes UartTx, UartRx, and two FIFOs into a single
-// peripheral with struct-based configuration and status.
-// This is the entity you instantiate in your SoC.
+// peripheral. This is the entity you instantiate in your SoC.
+//
+// Uses the simple 8N1 (115200 baud) transmitter and receiver
+// from earlier chapters. For a configurable version, see
+// uart_top_parameterized.sk.
+
+use fifo::FIFO;
+use uart_tx::UartTx;
+use uart_rx::UartRx;
 
 entity UartTop<const FIFO_DEPTH: nat = 16> {
     in clk: clock,
     in rst: reset,
-
-    // Configuration — can be hardwired or driven by a bus
-    in config: UartConfig,
-
-    // Aggregated status — readable by a bus interface
-    out status: UartStatus,
 
     // Write interface: host pushes data into TX FIFO
     in tx_data: bit[8],
@@ -224,6 +188,13 @@ entity UartTop<const FIFO_DEPTH: nat = 16> {
     // Read interface: host pulls data from RX FIFO
     out rx_data: bit[8],
     in rx_read: bit[1],
+
+    // Status
+    out tx_busy: bit[1],
+    out tx_fifo_full: bit[1],
+    out tx_fifo_empty: bit[1],
+    out rx_fifo_full: bit[1],
+    out rx_fifo_empty: bit[1],
 
     // Physical UART pins
     out tx: bit[1],
@@ -254,73 +225,48 @@ impl UartTop {
     signal tx_ready: bit[1]
     tx_read_en = tx_ready & !tx_fifo.empty
 
-    let uart_tx = UartTx {
-        clk: clk,
-        rst: rst,
-        baud_divider: config.baud_divider,
-        data_bits: config.data_bits,
-        parity_enable: config.parity_enable,
-        stop_bits: config.stop_bits,
-        data_in: tx_fifo.rd_data,
-        data_valid: tx_read_en,
-        tx: _,         // connected to top-level tx below
-        busy: _        // read via uart_tx.busy
+    let uart_tx_inst = UartTx {
+        clk:      clk,
+        rst:      rst,
+        tx_data:  tx_fifo.rd_data,
+        tx_start: tx_read_en
     }
 
     // Drive the top-level tx output from the transmitter.
-    tx = uart_tx.tx
+    tx = uart_tx_inst.tx
 
     // tx_ready: the transmitter can accept new data.
     // Assigned here — forward-referenced above. Combinational
     // signals can appear in any order.
-    tx_ready = !uart_tx.busy
+    tx_ready = !uart_tx_inst.tx_busy
+    tx_busy = uart_tx_inst.tx_busy
 
     // --- RX path ---
     //
     // Data flows: rx pin -> uart_rx -> rx_fifo -> rx_data
 
-    let uart_rx = UartRx {
+    let uart_rx_inst = UartRx {
         clk: clk,
         rst: rst,
-        baud_divider: config.baud_divider,
-        data_bits: config.data_bits,
-        parity_enable: config.parity_enable,
-        rx: rx,
-        data_out: _,       // read via uart_rx.data_out
-        rx_valid: _,       // read via uart_rx.rx_valid
-        frame_error: _     // read via uart_rx.frame_error
+        rx:  rx
     }
 
     let rx_fifo = FIFO<8, FIFO_DEPTH> {
-        clk: clk,
-        rst: rst,
-        wr_en: uart_rx.rx_valid,
-        wr_data: uart_rx.data_out,
-        rd_en: rx_read
+        clk:     clk,
+        rst:     rst,
+        wr_en:   uart_rx_inst.rx_valid,
+        wr_data: uart_rx_inst.rx_data,
+        rd_en:   rx_read
     }
 
     // Drive the top-level rx_data output from the RX FIFO.
     rx_data = rx_fifo.rd_data
 
-    // --- Status aggregation ---
-    //
-    // Construct the UartStatus struct from individual signals
-    // gathered from the sub-entities. Every field must be assigned.
-    //
-    // The overrun_error field is combinational logic: it is high
-    // when the RX FIFO is full and the receiver has new data.
-    // This means the incoming byte will be dropped.
-
-    status = UartStatus {
-        tx_busy: uart_tx.busy,
-        tx_fifo_full: tx_fifo.full,
-        tx_fifo_empty: tx_fifo.empty,
-        rx_valid: !rx_fifo.empty,
-        rx_fifo_full: rx_fifo.full,
-        rx_fifo_empty: rx_fifo.empty,
-        frame_error: uart_rx.frame_error,
-        overrun_error: rx_fifo.full & uart_rx.rx_valid
-    }
+    // --- Status outputs ---
+    tx_fifo_full  = tx_fifo.full
+    tx_fifo_empty = tx_fifo.empty
+    rx_fifo_full  = rx_fifo.full
+    rx_fifo_empty = rx_fifo.empty
 }
 ```
 
@@ -338,44 +284,38 @@ let instance_name = EntityName<GENERIC_ARGS> {
 
 Every input port must be connected. There are no positional connections — you always write `port_name: value`. This makes instantiation self-documenting and immune to port-order changes in the child entity.
 
-For output ports, you have two choices:
-
-1. **Connect to a signal.** Write `output_port: some_signal` and the output drives that signal directly.
-2. **Leave unbound with `_`.** Write `output_port: _` to acknowledge the output exists but indicate that you will read it via the `instance.port` syntax instead.
-
-The `_` is not "unconnected" in the hardware sense — the output still exists in the synthesized design. It means "I do not want to wire this to a named signal here; I will access it as `instance_name.output_port` elsewhere." This is why `uart_tx.busy` works in the status struct construction even though the `busy` port was bound to `_` in the instantiation.
+Output ports are accessed after the binding with dot notation: `instance_name.output_port`. This is how you wire sub-entity outputs to signals, ports, or other sub-entity inputs.
 
 ### Accessing Sub-Entity Outputs
 
 After a `let` binding, you access the outputs of the sub-entity with dot notation:
 
-```
+```skalp
 // These all read outputs from sub-entity instances:
-tx = uart_tx.tx
-tx_ready = !uart_tx.busy
-status.frame_error = uart_rx.frame_error
+tx = uart_tx_inst.tx
+tx_ready = !uart_tx_inst.tx_busy
+rx_data = rx_fifo.rd_data
 ```
 
-This syntax works anywhere a signal reference works — in combinational assignments, in struct constructions, in `on` blocks, and in other `let` bindings. The compiler resolves `uart_tx.tx` to the physical output signal of the `UartTx` instance.
+This syntax works anywhere a signal reference works — in combinational assignments, in `on` blocks, and in other `let` bindings. The compiler resolves `uart_tx_inst.tx` to the physical output signal of the `UartTx` instance.
 
-You cannot access input ports this way. `uart_tx.data_in` would be a compile error — inputs are driven by the connection you specified in the `let` binding, not read back from the instance.
+You cannot access input ports this way. `uart_tx_inst.tx_data` would be a compile error — inputs are driven by the connection you specified in the `let` binding, not read back from the instance.
 
 ### Struct Ports and Hierarchical Boundaries
 
-Notice how `config` is a `UartConfig` struct port on `UartTop`, but `UartTx` and `UartRx` take individual parameters like `baud_divider` and `data_bits`. You bridge the gap with field access:
+In a production design, you might group the status signals into a struct:
 
-```
-let uart_tx = UartTx {
-    baud_divider: config.baud_divider,
-    data_bits: config.data_bits,
-    parity_enable: config.parity_enable,
-    ...
+```skalp
+pub struct UartStatus {
+    tx_busy: bit[1],
+    tx_fifo_full: bit[1],
+    tx_fifo_empty: bit[1],
+    rx_fifo_full: bit[1],
+    rx_fifo_empty: bit[1]
 }
 ```
 
-The `config.baud_divider` expression extracts the `baud_divider` field from the `UartConfig` struct and passes it to the `UartTx` port. At the MIR level, this is a direct wire from the flattened `config_baud_divider` signal to the `uart_tx` instance's `baud_divider` input. No intermediate logic, no runtime cost.
-
-You could also refactor `UartTx` to accept a `UartConfig` struct directly. Whether to pass the struct or individual fields is a design choice — structs are better when the child needs most of the fields, individual ports are better when the child only needs one or two.
+And expose it as `out status: UartStatus` on the entity. The compiler would flatten this to `status_tx_busy`, `status_tx_fifo_full`, etc. in the generated SystemVerilog. Whether to use a struct or individual ports is a design choice — structs are better when you have many related signals that are always used together, individual ports are better for simple interfaces.
 
 ### Project Structure After This Chapter
 
@@ -389,7 +329,7 @@ uart-tutorial/
     uart_tx.sk          // Chapter 2 — UART transmitter
     uart_rx.sk          // Chapter 3 — UART receiver
     fifo.sk             // Chapter 4 — parameterized FIFO
-    uart_types.sk       // Chapter 6 — UartConfig, UartStatus structs
+    uart_buffered.sk    // Chapter 4 — UART with FIFOs
     uart_top.sk         // Chapter 6 — top-level composition
 ```
 
@@ -414,12 +354,10 @@ Build the project:
 skalp build
 ```
 
-You should see the compiler discover all source files, resolve the struct types, flatten them at MIR, and generate SystemVerilog for every entity:
+You should see the compiler discover all source files, resolve the imports, and generate SystemVerilog for every entity:
 
 ```
    Compiling uart-tutorial v0.1.0
-   Analyzing UartConfig (struct — flattened)
-   Analyzing UartStatus (struct — flattened)
    Analyzing FIFO<8, 16>
    Analyzing UartTx
    Analyzing UartRx
@@ -427,7 +365,7 @@ You should see the compiler discover all source files, resolve the struct types,
        Built UartTop -> build/uart_top.sv
 ```
 
-Inspect the generated `build/uart_top.sv`. You will see that the `config` port has been flattened into `config_baud_divider`, `config_data_bits`, `config_parity_enable`, and `config_stop_bits`. The `status` port is similarly flattened into eight individual output signals. The struct names do not appear anywhere in the SystemVerilog — they exist only in your skalp source.
+Inspect the generated `build/uart_top.sv`. You will see a standard SystemVerilog module with the individual ports: `tx_data`, `tx_write`, `rx_data`, `rx_read`, the status outputs, and the physical UART pins. The sub-entity instances are flattened — their internal signals become prefixed signals in the parent.
 
 Run a basic simulation to verify connectivity:
 
@@ -435,94 +373,93 @@ Run a basic simulation to verify connectivity:
 skalp sim --entity UartTop --cycles 5000 --vcd build/uart_top.vcd
 ```
 
-Open the VCD in a waveform viewer and confirm that writing a byte to `tx_data` with `tx_write` high causes the byte to appear on the `tx` pin after FIFO and baud-rate delays. Send a serial byte on the `rx` pin and confirm it appears on `rx_data` with `rx_valid` asserted in the status output.
+Open the VCD in a waveform viewer and confirm that writing a byte to `tx_data` with `tx_write` high causes the byte to appear on the `tx` pin after FIFO and baud-rate delays. Send a serial byte on the `rx` pin and confirm it appears on `rx_data` after the RX FSM completes.
 
-If you see `error: port 'stop_bits' not connected`, you forgot to wire one of the config fields to a sub-entity. The compiler enforces that every input port has a connection — there are no implicit defaults.
-
-If you see `error: output 'frame_error' is unused`, you declared an output port with `_` but never read it via `instance.port` syntax. Either connect it to a signal in the `let` binding or reference it somewhere in the impl.
+If you see `error: port 'tx_start' not connected`, you forgot to wire one of the sub-entity's input ports. The compiler enforces that every input port has a connection — there are no implicit defaults.
 
 ---
 
 ## Testing Your Design
 
-When an entity has struct-typed ports, the test API *flattens* them. A port `config: UartConfig` becomes individual signals: `config_baud_divider`, `config_data_bits`, etc. Similarly, `status: UartStatus` becomes `status_tx_busy`, `status_frame_error`, and so on. The naming convention is `portname_fieldname`.
+When an entity has struct-typed ports, the test API *flattens* them. A port `in color_a: Color` becomes individual signals: `color_a_r`, `color_a_g`, `color_a_b`. The naming convention is `portname_fieldname`.
 
 Here are tests from `tests/ch06_test.rs`:
 
 ### ColorMixer
 
 ```rust
-#[test]
-fn test_color_mixer_all_a() {
-    let mut tb = Testbench::new("ColorMixer");
-    tb.reset(2);
+use skalp_testing::Testbench;
+
+#[tokio::test]
+async fn test_color_mixer_all_a() {
+    let mut tb = Testbench::with_top_module("src/color_mixer.sk", "ColorMixer")
+        .await.unwrap();
+    tb.reset(2).await;
 
     // mix_factor = 0 -> output entirely color_a
-    tb.set("color_a_r", 255);
-    tb.set("color_a_g", 128);
-    tb.set("color_a_b", 64);
-    tb.set("color_b_r", 0);
-    tb.set("color_b_g", 0);
-    tb.set("color_b_b", 0);
-    tb.set("mix_factor", 0);
-    tb.clock();
+    tb.set("color_a_r", 255u32);
+    tb.set("color_a_g", 128u32);
+    tb.set("color_a_b", 64u32);
+    tb.set("color_b_r", 0u32);
+    tb.set("color_b_g", 0u32);
+    tb.set("color_b_b", 0u32);
+    tb.set("mix_factor", 0u32);
+    tb.clock(1).await;
 
     // Integer arithmetic loses a bit of precision:
     // (255 * 255) >> 8 = 254
-    let r = tb.get("result_r");
+    let r = tb.get_u64("result_r").await;
     assert!(r >= 253, "Red channel should be ~255, got {}", r);
 }
 
-#[test]
-fn test_color_mixer_midpoint() {
-    let mut tb = Testbench::new("ColorMixer");
-    tb.reset(2);
+#[tokio::test]
+async fn test_color_mixer_midpoint() {
+    let mut tb = Testbench::with_top_module("src/color_mixer.sk", "ColorMixer")
+        .await.unwrap();
+    tb.reset(2).await;
 
-    tb.set("color_a_r", 200);
-    tb.set("color_a_g", 0);
-    tb.set("color_a_b", 0);
-    tb.set("color_b_r", 0);
-    tb.set("color_b_g", 200);
-    tb.set("color_b_b", 0);
-    tb.set("mix_factor", 128); // 50/50 blend
-    tb.clock();
+    tb.set("color_a_r", 200u32);
+    tb.set("color_a_g", 0u32);
+    tb.set("color_a_b", 0u32);
+    tb.set("color_b_r", 0u32);
+    tb.set("color_b_g", 200u32);
+    tb.set("color_b_b", 0u32);
+    tb.set("mix_factor", 128u32); // 50/50 blend
+    tb.clock(1).await;
 
-    let r = tb.get("result_r");
-    let g = tb.get("result_g");
+    let r = tb.get_u64("result_r").await;
+    let g = tb.get_u64("result_g").await;
     assert!(r >= 95 && r <= 105, "Red ~100, got {}", r);
     assert!(g >= 95 && g <= 105, "Green ~100, got {}", g);
 }
 ```
 
-### UartTop (struct status)
+### UartTop (status ports)
 
 ```rust
-#[test]
-fn test_uart_top_struct_status() {
-    let mut tb = Testbench::new("UartTop");
-    tb.reset(2);
-    tb.set("rx", 1);
+#[tokio::test]
+async fn test_uart_top_idle_state() {
+    let mut tb = Testbench::with_top_module("src/uart_top.sk", "UartTop")
+        .await.unwrap();
+    tb.reset(2).await;
+    tb.set("rx", 1u8);
 
-    // Configure via flattened struct ports
-    tb.set("config_baud_divider", 434);
-    tb.set("config_data_bits", 8);
-    tb.set("config_parity_enable", 0);
-    tb.set("config_stop_bits", 1);
+    // After reset, TX should be idle (high) and FIFOs should be empty
+    tb.expect("tx", 1u32).await;
+    tb.expect("tx_fifo_full", 0u32).await;
+    tb.expect("tx_fifo_empty", 1u32).await;
+    tb.expect("rx_fifo_empty", 1u32).await;
 
-    // Check status struct fields after reset
-    tb.expect("status_tx_busy", 0);
-    tb.expect("status_tx_fifo_full", 0);
-    tb.expect("status_tx_fifo_empty", 1);
-    tb.expect("status_rx_fifo_empty", 1);
-    tb.expect("status_frame_error", 0);
-    tb.expect("status_overrun_error", 0);
+    // Run for a while with no activity — nothing should change
+    tb.clock(1000).await;
+    tb.expect("tx", 1u32).await;
 }
 ```
 
 Run with:
 
 ```bash
-skalp test
+cargo test
 ```
 
 **Exercise:** Write a `test_color_mixer_all_b` test that sets `mix_factor` to 255 and verifies the output matches `color_b`.
