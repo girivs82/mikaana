@@ -462,7 +462,7 @@ use skalp_testing::Testbench;
 
 #[tokio::test]
 async fn test_uart_tx() {
-    let mut tb = Testbench::new("src/uart.vhd", "uart").await.unwrap();
+    let mut tb = Testbench::new("src/uart.vhd").await.unwrap();
     tb.reset(2).await;
 
     // Send a byte (0x55 = alternating bits, good for baud rate testing)
@@ -491,7 +491,7 @@ The test resets, presents a byte with the strobe, polls for acknowledgment (the 
 ```rust
 #[tokio::test]
 async fn test_uart_rx() {
-    let mut tb = Testbench::new("src/uart.vhd", "uart").await.unwrap();
+    let mut tb = Testbench::new("src/uart.vhd").await.unwrap();
     tb.reset(2).await;
 
     // The rx line idles high

@@ -260,7 +260,7 @@ use skalp_testing::Testbench;
 
 #[tokio::test]
 async fn test_mux4_selects() {
-    let mut tb = Testbench::new("src/mux4.vhd", "mux4").await.unwrap();
+    let mut tb = Testbench::new("src/mux4.vhd").await.unwrap();
     tb.set("a", 0x11u32);
     tb.set("b", 0x22u32);
     tb.set("c", 0x33u32);

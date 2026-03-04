@@ -40,10 +40,10 @@ skalp provides a Rust crate called `skalp_testing` that contains the `Testbench`
 ```rust
 use skalp_testing::Testbench;
 
-let mut tb = Testbench::new("src/counter.vhd", "counter").await.unwrap();
+let mut tb = Testbench::new("src/counter.vhd").await.unwrap();
 ```
 
-Takes the VHDL source path and entity name. Returns a `Result` — if the VHDL has errors or the entity name does not match, you get compile diagnostics. Each test gets its own simulator instance. Tests do not share state and run in parallel.
+Takes the VHDL source path. Returns a `Result` — if the VHDL has errors, you get compile diagnostics. Each test gets its own simulator instance. Tests do not share state and run in parallel.
 
 ### `set` — Drive an Input
 
@@ -117,7 +117,7 @@ use skalp_testing::Testbench;
 
 #[tokio::test]
 async fn test_counter_counts() {
-    let mut tb = Testbench::new("src/counter.vhd", "counter").await.unwrap();
+    let mut tb = Testbench::new("src/counter.vhd").await.unwrap();
     tb.reset(2).await;
     tb.expect("count", 0u32).await;
     tb.set("en", 1u8);
@@ -129,7 +129,7 @@ async fn test_counter_counts() {
 
 #[tokio::test]
 async fn test_counter_overflow() {
-    let mut tb = Testbench::new("src/counter.vhd", "counter").await.unwrap();
+    let mut tb = Testbench::new("src/counter.vhd").await.unwrap();
     tb.reset(2).await;
     tb.set("en", 1u8);
     tb.clock(255).await;
@@ -140,7 +140,7 @@ async fn test_counter_overflow() {
 
 #[tokio::test]
 async fn test_counter_disable() {
-    let mut tb = Testbench::new("src/counter.vhd", "counter").await.unwrap();
+    let mut tb = Testbench::new("src/counter.vhd").await.unwrap();
     tb.reset(2).await;
     tb.set("en", 1u8);
     tb.clock(5).await;
@@ -185,7 +185,7 @@ use skalp_testing::Testbench;
 
 #[tokio::test]
 async fn test_timer_match() {
-    let mut tb = Testbench::new("src/timer.vhd", "timer").await.unwrap();
+    let mut tb = Testbench::new("src/timer.vhd").await.unwrap();
     tb.reset(2).await;
     tb.set("prescaler", 0u8);  // no division
     tb.set("threshold", 10u32);
@@ -199,7 +199,7 @@ async fn test_timer_match() {
 
 #[tokio::test]
 async fn test_timer_prescaler() {
-    let mut tb = Testbench::new("src/timer.vhd", "timer").await.unwrap();
+    let mut tb = Testbench::new("src/timer.vhd").await.unwrap();
     tb.reset(2).await;
     tb.set("prescaler", 1u8);  // divide by 2
     tb.set("threshold", 5u32);
@@ -213,7 +213,7 @@ async fn test_timer_prescaler() {
 
 #[tokio::test]
 async fn test_timer_disabled() {
-    let mut tb = Testbench::new("src/timer.vhd", "timer").await.unwrap();
+    let mut tb = Testbench::new("src/timer.vhd").await.unwrap();
     tb.reset(2).await;
     tb.set("prescaler", 0u8);
     tb.set("threshold", 10u32);
@@ -242,7 +242,7 @@ use skalp_testing::Testbench;
 
 #[tokio::test]
 async fn test_i2c_idle_state() {
-    let mut tb = Testbench::new("src/i2c_fsm.vhd", "i2c_fsm").await.unwrap();
+    let mut tb = Testbench::new("src/i2c_fsm.vhd").await.unwrap();
     tb.reset(2).await;
     tb.set("sda_in", 1u8);
 
@@ -253,7 +253,7 @@ async fn test_i2c_idle_state() {
 
 #[tokio::test]
 async fn test_i2c_start_transfer() {
-    let mut tb = Testbench::new("src/i2c_fsm.vhd", "i2c_fsm").await.unwrap();
+    let mut tb = Testbench::new("src/i2c_fsm.vhd").await.unwrap();
     tb.reset(2).await;
     tb.set("sda_in", 1u8);
 
@@ -279,7 +279,7 @@ async fn test_i2c_start_transfer() {
 
 #[tokio::test]
 async fn test_i2c_returns_to_idle() {
-    let mut tb = Testbench::new("src/i2c_fsm.vhd", "i2c_fsm").await.unwrap();
+    let mut tb = Testbench::new("src/i2c_fsm.vhd").await.unwrap();
     tb.reset(2).await;
     tb.set("sda_in", 1u8);
 
@@ -332,7 +332,7 @@ Now the I2C test reads cleanly:
 ```rust
 #[tokio::test]
 async fn test_i2c_start_transfer_clean() {
-    let mut tb = Testbench::new("src/i2c_fsm.vhd", "i2c_fsm").await.unwrap();
+    let mut tb = Testbench::new("src/i2c_fsm.vhd").await.unwrap();
     tb.reset(2).await;
     tb.set("sda_in", 1u8);
 
@@ -380,7 +380,7 @@ When `expect` fails, the error message usually tells you enough. When it does no
 ```rust
 #[tokio::test]
 async fn test_i2c_debug() {
-    let mut tb = Testbench::new("src/i2c_fsm.vhd", "i2c_fsm").await.unwrap();
+    let mut tb = Testbench::new("src/i2c_fsm.vhd").await.unwrap();
     tb.reset(2).await;
     tb.set("sda_in", 1u8);
 
@@ -415,7 +415,7 @@ VCD (Value Change Dump) is the IEEE 1364 standard waveform format. Despite its V
 > | Traditional Approach | skalp + Rust |
 > |---------------------|-------------|
 > | Write a VHDL test entity with no ports | Write a Rust function with `#[tokio::test]` |
-> | Instantiate the DUT as a component | `Testbench::new("file.vhd", "entity")` |
+> | Instantiate the DUT as a component | `Testbench::new("file.vhd")` |
 > | Generate a clock with `wait for 10 ns` loops | Built in: `tb.clock(n)` |
 > | Drive signals with `<=` and `wait` | `tb.set("signal", value)` |
 > | Check outputs with `assert` (often missing) | `tb.expect("signal", value)` fails the test |
@@ -482,7 +482,7 @@ When multiple test files need the same helpers, put them in `tests/common/mod.rs
 
 | API Method | Signature | Purpose |
 |------------|-----------|---------|
-| `Testbench::new` | `new(path, entity).await.unwrap()` | Compile VHDL and create simulator |
+| `Testbench::new` | `new(path).await.unwrap()` | Compile VHDL and create simulator |
 | `set` | `tb.set("port", value)` | Drive input (takes effect next clock) |
 | `clock` | `tb.clock(n).await` | Advance n clock cycles |
 | `expect` | `tb.expect("port", value).await` | Assert signal equals value |

@@ -667,7 +667,7 @@ const DIVIDER: u64 = (CLK_FREQ / SCLK_FREQ) / 2;  // 5
 
 #[tokio::test]
 async fn test_spi_idle_state() {
-    let mut tb = Testbench::new("src/spi_master.vhd", "SPI_MASTER").await.unwrap();
+    let mut tb = Testbench::new("src/spi_master.vhd").await.unwrap();
     tb.reset(2).await;
     tb.expect("DIN_RDY", 1u32).await;
     tb.expect("SCLK", 0u32).await;
@@ -684,7 +684,7 @@ The constants at the top mirror the design's default generics. `DIVIDER` is 5, m
 ```rust
 #[tokio::test]
 async fn test_spi_single_byte_transfer() {
-    let mut tb = Testbench::new("src/spi_master.vhd", "SPI_MASTER").await.unwrap();
+    let mut tb = Testbench::new("src/spi_master.vhd").await.unwrap();
     tb.reset(2).await;
 
     // Load data
@@ -717,7 +717,7 @@ Note the handshake: `DIN_VLD` is asserted for one cycle while `DIN` holds the da
 ```rust
 #[tokio::test]
 async fn test_spi_loopback() {
-    let mut tb = Testbench::new("src/spi_master.vhd", "SPI_MASTER").await.unwrap();
+    let mut tb = Testbench::new("src/spi_master.vhd").await.unwrap();
     tb.reset(2).await;
 
     // Connect MOSI to MISO for loopback

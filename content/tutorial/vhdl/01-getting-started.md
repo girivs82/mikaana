@@ -210,7 +210,7 @@ use skalp_testing::Testbench;
 
 #[tokio::test]
 async fn test_counter_counts() {
-    let mut tb = Testbench::new("src/counter.vhd", "counter").await.unwrap();
+    let mut tb = Testbench::new("src/counter.vhd").await.unwrap();
     tb.reset(2).await;
     tb.expect("count", 0u32).await;
     tb.set("en", 1u8);

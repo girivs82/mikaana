@@ -335,7 +335,7 @@ use skalp_testing::Testbench;
 
 #[tokio::test]
 async fn test_register_write_read() {
-    let mut tb = Testbench::new("src/gpio_ctrl.vhd", "gpio_ctrl").await.unwrap();
+    let mut tb = Testbench::new("src/gpio_ctrl.vhd").await.unwrap();
     tb.reset(2).await;
 
     // Write 0xA5 to output register (addr = 01)
@@ -377,7 +377,7 @@ This test writes `0xA5` to the output register, reads it back via the read mux, 
 ```rust
 #[tokio::test]
 async fn test_edge_detect_interrupt() {
-    let mut tb = Testbench::new("src/gpio_ctrl.vhd", "gpio_ctrl").await.unwrap();
+    let mut tb = Testbench::new("src/gpio_ctrl.vhd").await.unwrap();
     tb.reset(2).await;
 
     // No interrupt initially

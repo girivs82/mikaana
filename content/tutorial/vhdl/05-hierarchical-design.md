@@ -304,7 +304,7 @@ use skalp_testing::Testbench;
 
 #[tokio::test]
 async fn test_bus_single_transfer() {
-    let mut tb = Testbench::new("src/bus_system.vhd", "bus_system")
+    let mut tb = Testbench::new("src/bus_system.vhd")
         .await
         .unwrap();
     tb.reset(2).await;
@@ -333,7 +333,7 @@ async fn test_bus_single_transfer() {
 
 #[tokio::test]
 async fn test_bus_back_to_back_transfers() {
-    let mut tb = Testbench::new("src/bus_system.vhd", "bus_system")
+    let mut tb = Testbench::new("src/bus_system.vhd")
         .await
         .unwrap();
     tb.reset(2).await;
@@ -355,7 +355,7 @@ async fn test_bus_back_to_back_transfers() {
 
 #[tokio::test]
 async fn test_bus_no_trigger_no_data() {
-    let mut tb = Testbench::new("src/bus_system.vhd", "bus_system")
+    let mut tb = Testbench::new("src/bus_system.vhd")
         .await
         .unwrap();
     tb.reset(2).await;
