@@ -567,16 +567,16 @@ These are simulation constructs. skalp's position is that simulation belongs in 
 
 **Not yet implemented (future work):**
 - External names (`<< ... >>`) — VHDL-2008 hierarchical signal access
-- Conditional expressions (`x when condition else y` in expression context) — currently supported only as concurrent statements
+- Conditional expressions (`x when condition else y`) — supported in concurrent and sequential assignments; not yet supported as subexpressions within larger expressions
 - Type bounds on generics (constraining generic types) — planned for Phase 2
 - Multi-dimensional array slicing
-- Some attribute semantics (`'subtype`, `'length` on generic-dependent types)
+- Some attribute semantics (`'subtype` on constrained subtypes)
 - Full constraint resolution for unconstrained subtypes
 
 **Known edge cases:**
-- Integer range types without explicit bounds default to 32-bit width
+- Integer range types without explicit bounds default to 32-bit width (matching the VHDL LRM minimum range for `integer`)
 - Complex aggregate expressions with nested `others` may require explicit type qualification
-- Recursive function calls are limited to 5 levels (same as skalp-native, sufficient for synthesizable logic)
+- Recursive function calls are unrolled up to 64 levels deep (inlining depth limit in the MIR pass); functions with more than 5 nested call sites are synthesized as separate modules rather than inlined
 
 ---
 
