@@ -5,6 +5,7 @@ summary: "Array types, generic parameters, and clog2() — build a parameterized
 tags: ["skalp", "tutorial", "fifo", "generics", "arrays"]
 weight: 4
 ShowToc: true
+aliases: ["/tutorial/04-arrays-and-generics/"]
 ---
 
 ## What You'll Learn

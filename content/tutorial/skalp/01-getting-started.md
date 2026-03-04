@@ -5,6 +5,7 @@ summary: "Your first skalp entity — an 8-bit counter that introduces the entit
 tags: ["skalp", "tutorial", "hdl", "hardware"]
 weight: 1
 ShowToc: true
+aliases: ["/tutorial/01-getting-started/"]
 ---
 
 ## What This Chapter Teaches

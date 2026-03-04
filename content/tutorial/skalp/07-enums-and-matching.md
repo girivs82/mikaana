@@ -5,6 +5,7 @@ summary: "Enum types with explicit bit encoding, match expressions that return v
 tags: ["skalp", "tutorial", "hardware", "hdl"]
 weight: 7
 ShowToc: true
+aliases: ["/tutorial/07-enums-and-matching/"]
 ---
 
 ## What This Chapter Teaches

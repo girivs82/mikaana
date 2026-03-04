@@ -5,6 +5,7 @@ summary: "Make your designs fully configurable with generic defaults, explicit i
 tags: ["skalp", "tutorial", "hdl", "hardware"]
 weight: 5
 ShowToc: true
+aliases: ["/tutorial/05-parameterization/"]
 ---
 
 ## What This Chapter Teaches

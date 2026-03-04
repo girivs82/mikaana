@@ -5,6 +5,7 @@ summary: "Async Rust testbench API -- Testbench::with_top_module(), tb.set(), tb
 tags: ["skalp", "tutorial", "hardware", "hdl"]
 weight: 10
 ShowToc: true
+aliases: ["/tutorial/10-testing/"]
 ---
 
 ## What This Chapter Teaches

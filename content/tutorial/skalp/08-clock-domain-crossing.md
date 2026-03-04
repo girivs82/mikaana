@@ -5,6 +5,7 @@ summary: "Clock domain lifetimes, CDC compile-time safety, dual-clock entities, 
 tags: ["skalp", "tutorial", "hardware", "hdl"]
 weight: 8
 ShowToc: true
+aliases: ["/tutorial/08-clock-domain-crossing/"]
 ---
 
 ## What This Chapter Teaches

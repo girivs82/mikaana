@@ -5,6 +5,7 @@ summary: "Build a complete UART transmitter with FSM states, baud rate timing, a
 tags: ["skalp", "tutorial", "hdl", "hardware", "uart"]
 weight: 2
 ShowToc: true
+aliases: ["/tutorial/02-state-machines/"]
 ---
 
 ## What This Chapter Teaches

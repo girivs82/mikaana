@@ -1,103 +1,45 @@
 ---
-title: "skalp Tutorial"
-summary: "Learn skalp by building a complete UART peripheral — from your first entity to clock domain crossings, safety annotations, and Rust-based testbenches."
+title: "Tutorials"
+summary: "Learn to design hardware with skalp — choose a language track to get started."
 ---
 
-## Learn skalp by Building Real Hardware
+## Choose Your Track
 
-This tutorial takes you from zero skalp knowledge to a fully-featured UART peripheral with FIFOs, clock domain crossings, safety mechanisms, and a complete test suite. Each chapter introduces a language feature with a small standalone example, then applies it to the running UART project.
-
-By the end, you'll have built:
-
-- A **UART transmitter** with baud rate generation and FSM control
-- A **UART receiver** with mid-bit sampling and edge detection
-- **Parameterized FIFOs** with generic width and depth
-- **Struct-based** configuration and status ports
-- **Enum-driven** state machines with exhaustive pattern matching
-- **Clock domain crossing** safety with dual-clock async FIFOs
-- **Safety annotations** including TMR, trace, and breakpoint infrastructure
-- A **Rust testbench** with full coverage of the UART peripheral
+skalp compiles both its own language and VHDL. Pick the tutorial that matches your background:
 
 ---
 
-## Prerequisites
+### [skalp Language Tutorial](skalp/)
 
-This tutorial assumes you already know how to design digital hardware. You should be comfortable with:
+**Build a complete UART peripheral from scratch.**
 
-- RTL concepts: registers, combinational logic, clock edges, reset
-- State machines, counters, shift registers
-- Basic UART protocol (start bit, data bits, stop bit)
-- Either SystemVerilog or VHDL (comparisons throughout use SystemVerilog)
+10 chapters that take you from your first entity to clock domain crossings, safety annotations, and Rust-based testbenches. Best if you want to learn the skalp language itself.
 
-You do **not** need to know Rust, though familiarity helps for Chapter 10 (testing). The tutorial explains Rust-specific concepts where they appear.
-
----
-
-## Installation
-
-Install skalp from source:
-
-```bash
-git clone https://github.com/girivs82/skalp.git
-cd skalp
-cargo build --release
-```
-
-Add the binary to your PATH:
-
-```bash
-export PATH="$PATH:$(pwd)/target/release"
-```
-
-Verify:
-
-```bash
-skalp --version
-```
-
-Create a new project for the tutorial:
-
-```bash
-skalp new uart-tutorial
-cd uart-tutorial
-```
-
-This creates a project with `skalp.toml` and a `src/` directory. Each chapter adds files to this project.
+1. [Getting Started](skalp/01-getting-started/) — Entities, signals, `on(clk.rise)`
+2. [State Machines](skalp/02-state-machines/) — UART transmitter with FSM and baud timing
+3. [UART Receiver](skalp/03-uart-receiver/) — Mid-bit sampling and edge detection
+4. [Arrays and Generics](skalp/04-arrays-and-generics/) — Parameterized FIFO buffering
+5. [Parameterization](skalp/05-parameterization/) — Const generics and configurable designs
+6. [Structs and Composition](skalp/06-structs-and-composition/) — Hierarchical design with struct ports
+7. [Enums and Matching](skalp/07-enums-and-matching/) — Type-safe FSMs with exhaustive matching
+8. [Clock Domain Crossing](skalp/08-clock-domain-crossing/) — CDC safety with clock lifetimes
+9. [Safety and Annotations](skalp/09-safety-and-annotations/) — TMR, trace, breakpoints
+10. [Testing](skalp/10-testing/) — Async Rust testbenches with full coverage
 
 ---
 
-## Chapters
+### [VHDL with skalp Tutorial](vhdl/)
 
-1. **[Getting Started](01-getting-started/)** — Entities, signals, `on(clk.rise)`, and your first counter. The entity/impl split, port declarations, basic types.
+**Use your existing VHDL designs with skalp's compiler, simulator, and Rust test framework.**
 
-2. **[State Machines — UART Transmitter](02-state-machines/)** — Build the UART TX with FSM states, baud rate timing, and shift register serialization.
+9 chapters that walk through progressively complex VHDL designs — counters, FSMs, generics, hierarchical systems — compiled and tested with skalp. Best if you already know VHDL and want to use skalp as your build and verification tool.
 
-3. **[UART Receiver](03-uart-receiver/)** — Mid-bit sampling, edge detection, bit reconstruction. The RX side of the UART.
-
-4. **[Arrays and Generics — FIFO Buffering](04-arrays-and-generics/)** — Array types, generic parameters, `clog2()`. Build a parameterized FIFO and add buffering to the UART.
-
-5. **[Const Generics and Parameterization](05-parameterization/)** — Generic defaults, compile-time computation, test vs. production parameters. Make the UART fully configurable.
-
-6. **[Structs and Hierarchical Composition](06-structs-and-composition/)** — Struct definitions, struct ports, hierarchical instantiation. Clean up the UART with structured configuration.
-
-7. **[Enums and Pattern Matching](07-enums-and-matching/)** — Enum types, `match` expressions, exhaustiveness checking. Refactor FSM states and add a command parser.
-
-8. **[Clock Domain Crossing](08-clock-domain-crossing/)** — Clock lifetimes, CDC compile-time safety, dual-clock entities, async FIFOs. Make the UART dual-clock.
-
-9. **[Safety and Annotations](09-safety-and-annotations/)** — `#[safety_mechanism]`, TMR voting, `#[trace]`, `#[breakpoint]`. Add safety infrastructure to the UART.
-
-10. **[Testing and Verification](10-testing/)** — Rust testbench API, test organization, waveform generation. Build a complete test suite for the UART.
-
----
-
-## What This Tutorial Doesn't Cover
-
-This tutorial focuses on the skalp language and workflow. For deeper topics, see:
-
-- **Compiler internals and architecture** — [skalp project page](/projects/skalp/)
-- **Null Convention Logic (async circuits)** — [NCL blog post](/blog/null-convention-logic/)
-- **Production design patterns** — [Design Patterns in Real skalp Code](/blog/skalp-design-patterns/)
-
----
-
-**Ready?** Start with [Chapter 1: Getting Started](01-getting-started/).
+1. [Getting Started](vhdl/01-getting-started/) — Compile and simulate `counter.vhd`
+2. [Combinational Logic](vhdl/02-combinational-logic/) — Multiplexers, `process(all)`, `case/when`
+3. [Clocked Processes and FSMs](vhdl/03-processes-and-fsms/) — Timers, I2C controller, enumerations
+4. [Generics, Records, and Arrays](vhdl/04-generics-and-types/) — GPIO controller, edge detection
+5. [Hierarchical Design](vhdl/05-hierarchical-design/) — Multi-entity systems, port maps
+6. [Testing VHDL with Rust](vhdl/06-testing-with-rust/) — `Testbench` API, waveforms, coverage
+7. [skalp Integration](vhdl/07-skalp-integration/) — Pragmas, formal verification, mixed designs
+8. [VHDL-2019 Features](vhdl/08-vhdl-2019/) — Interfaces, views, generic types
+9. [Real-World Project](vhdl/09-real-world-project/) — SPI master capstone with full test suite

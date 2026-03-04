@@ -5,6 +5,7 @@ summary: "Mid-bit sampling, edge detection, and bit reconstruction — build the
 tags: ["skalp", "tutorial", "uart", "fsm", "edge-detection"]
 weight: 3
 ShowToc: true
+aliases: ["/tutorial/03-uart-receiver/"]
 ---
 
 ## What You'll Learn

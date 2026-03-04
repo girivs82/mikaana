@@ -5,6 +5,7 @@ summary: "Group related signals into structs for cleaner interfaces, then compos
 tags: ["skalp", "tutorial", "hardware", "hdl"]
 weight: 6
 ShowToc: true
+aliases: ["/tutorial/06-structs-and-composition/"]
 ---
 
 ## What This Chapter Teaches

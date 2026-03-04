@@ -5,6 +5,7 @@ summary: "Add safety mechanisms and debug infrastructure to your designs with TM
 tags: ["skalp", "tutorial", "hardware", "hdl"]
 weight: 9
 ShowToc: true
+aliases: ["/tutorial/09-safety-and-annotations/"]
 ---
 
 ## What This Chapter Teaches
