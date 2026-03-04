@@ -30,6 +30,7 @@ Error messages now use `codespan-reporting` for rustc-style diagnostics — sour
 
 ## Tooling Improvements
 
+- **VS Code extension** — available as a `.vsix` download on the [GitHub release](https://github.com/girivs82/skalp/releases/tag/v0.2.0), with syntax highlighting, LSP integration, waveform viewer, schematic viewer, debugger, and testbench scaffolding for both skalp and VHDL
 - **VHDL LSP support** — the language server handles VHDL files with semantic token highlighting and schematic support
 - **VHDL formatter** — Wadler-Lindig pretty-printing for VHDL source
 - **skalp source formatter** — `skalp fmt` rewritten with Wadler-Lindig pretty-printing
@@ -70,6 +71,14 @@ See the [full changelog](https://github.com/girivs82/skalp/blob/main/CHANGELOG.m
 | Windows x86_64 | [`skalp-windows-x86_64.exe`](https://github.com/girivs82/skalp/releases/tag/v0.2.0) |
 
 Download the binary for your platform and add it to your `PATH`.
+
+### VS Code extension
+
+```bash
+code --install-extension skalp-0.2.0.vsix
+```
+
+Download [`skalp-0.2.0.vsix`](https://github.com/girivs82/skalp/releases/tag/v0.2.0) from the GitHub release.
 
 ### From source
 
