@@ -352,6 +352,31 @@ MISO is sampled on the first edge (rising SCLK) and held in `miso_reg` until the
 
 ---
 
+### DIN_LAST Register and Output Connections
+
+```vhdl
+    din_last_reg_n_p : process (CLK)
+    begin
+        if (rising_edge(CLK)) then
+            if (RST = '1') then
+                din_last_reg_n <= '0';
+            elsif (load_data = '1') then
+                din_last_reg_n <= not DIN_LAST;
+            end if;
+        end if;
+    end process;
+
+    DOUT_VLD <= rx_data_vld;
+```
+
+The `din_last_reg_n` register captures the inverse of `DIN_LAST` when data is loaded. In the `idle` and `transmit_gap` states, the FSM output logic sets `chip_select_n <= not din_last_reg_n`. When the most recent transfer had `DIN_LAST = 1` (last word), `din_last_reg_n = '0'`, so `chip_select_n = '1'` -- CS deasserts. When `DIN_LAST = 0` (more words coming), `din_last_reg_n = '1'`, so `chip_select_n = '0'` -- CS stays asserted between chained words.
+
+The reset value `'0'` ensures CS_N is deasserted after reset (as if the previous transaction was the last one).
+
+`DOUT_VLD` connects the internal `rx_data_vld` signal to the output port, pulsing high for one cycle when the received word is ready in `DOUT`.
+
+---
+
 ### Three-Process FSM
 
 The FSM is split across three processes. This is the canonical VHDL FSM structure that you will see in virtually every professional VHDL codebase.
@@ -669,13 +694,15 @@ const DIVIDER: u64 = (CLK_FREQ / SCLK_FREQ) / 2;  // 5
 async fn test_spi_idle_state() {
     let mut tb = Testbench::new("src/spi_master.vhd").await.unwrap();
     tb.reset(2).await;
-    tb.expect("DIN_RDY", 1u32).await;
-    tb.expect("SCLK", 0u32).await;
-    tb.expect("CS_N", 1u32).await;
+    tb.expect("din_rdy", 1u32).await;
+    tb.expect("sclk", 0u32).await;
+    tb.expect("cs_n", 1u32).await;
 }
 ```
 
-This test verifies the post-reset state: the master is ready to accept data (`DIN_RDY = 1`), the SPI clock is idle low (`SCLK = 0`), and the chip select is deasserted (`CS_N = 1`). If any of these conditions fail, the FSM reset logic is broken.
+This test verifies the post-reset state: the master is ready to accept data (`din_rdy = 1`), the SPI clock is idle low (`sclk = 0`), and the chip select is deasserted (`cs_n = 1`). If any of these conditions fail, the FSM reset logic is broken.
+
+> **Note:** skalp normalizes all VHDL identifiers to lowercase during compilation, so the Rust tests use lowercase signal names (`din_rdy`, `sclk`, `cs_n`) even though the VHDL source uses uppercase (`DIN_RDY`, `SCLK`, `CS_N`).
 
 The constants at the top mirror the design's default generics. `DIVIDER` is 5, meaning the system counter counts 0-4 before toggling SCLK. These constants help you reason about timing in the tests below.
 
@@ -688,21 +715,21 @@ async fn test_spi_single_byte_transfer() {
     tb.reset(2).await;
 
     // Load data
-    tb.set("DIN", 0xA5u32);
-    tb.set("DIN_ADDR", 0u8);
-    tb.set("DIN_LAST", 1u8);
-    tb.set("DIN_VLD", 1u8);
+    tb.set("din", 0xA5u32);
+    tb.set("din_addr", 0u8);
+    tb.set("din_last", 1u8);
+    tb.set("din_vld", 1u8);
     tb.clock(1).await;
-    tb.set("DIN_VLD", 0u8);
+    tb.set("din_vld", 0u8);
 
     // Wait for transfer to complete
     for _ in 0..500 {
         tb.clock(1).await;
-        if tb.get_u64("DOUT_VLD").await == 1 {
+        if tb.get_u64("dout_vld").await == 1 {
             break;
         }
     }
-    tb.expect("DOUT_VLD", 1u32).await;
+    tb.expect("dout_vld", 1u32).await;
 }
 ```
 
@@ -721,25 +748,25 @@ async fn test_spi_loopback() {
     tb.reset(2).await;
 
     // Connect MOSI to MISO for loopback
-    tb.set("DIN", 0x5Au32);
-    tb.set("DIN_ADDR", 0u8);
-    tb.set("DIN_LAST", 1u8);
-    tb.set("DIN_VLD", 1u8);
+    tb.set("din", 0x5Au32);
+    tb.set("din_addr", 0u8);
+    tb.set("din_last", 1u8);
+    tb.set("din_vld", 1u8);
     tb.clock(1).await;
-    tb.set("DIN_VLD", 0u8);
+    tb.set("din_vld", 0u8);
 
     // Drive MISO from MOSI each cycle
     for _ in 0..500 {
-        let mosi = tb.get_u64("MOSI").await;
-        tb.set("MISO", mosi as u8);
+        let mosi = tb.get_u64("mosi").await;
+        tb.set("miso", mosi as u8);
         tb.clock(1).await;
-        if tb.get_u64("DOUT_VLD").await == 1 {
+        if tb.get_u64("dout_vld").await == 1 {
             break;
         }
     }
 
-    tb.expect("DOUT_VLD", 1u32).await;
-    tb.expect("DOUT", 0x5Au32).await;
+    tb.expect("dout_vld", 1u32).await;
+    tb.expect("dout", 0x5Au32).await;
 }
 ```
 
@@ -771,13 +798,7 @@ test test_spi_loopback ... ok
 test result: ok. 3 passed; 0 finished in 0.25s
 ```
 
-To generate waveforms for debugging:
-
-```bash
-skalp sim --entity SPI_MASTER --cycles 200 --vcd build/spi_master.vcd
-```
-
-Open the VCD file in the skalp VS Code extension to see SCLK toggling, MOSI shifting out data, CS_N framing the transaction, and the FSM state transitions.
+To generate waveforms for debugging, add `tb.export_waveform("build/spi_master.skw.gz").unwrap();` at the end of a test. Open the `.skw.gz` file in the skalp VS Code extension to see SCLK toggling, MOSI shifting out data, CS_N framing the transaction, and the FSM state transitions.
 
 **Exercise:** Add a test that sends two consecutive words without deasserting CS_N between them. Set `DIN_LAST = 0` for the first word and `DIN_LAST = 1` for the second. Verify that CS_N stays low throughout both transfers and only deasserts after the second word completes.
 
@@ -807,7 +828,7 @@ The core workflow is always the same:
 2. `skalp build` to compile
 3. Write Rust tests in `tests/`
 4. `cargo test` to verify
-5. `skalp sim --vcd` to debug with waveforms
+5. `tb.export_waveform("build/name.skw.gz")` to debug with waveforms
 
 This is the workflow that skalp was designed to enable: write your VHDL, test it with Rust, iterate fast.
 

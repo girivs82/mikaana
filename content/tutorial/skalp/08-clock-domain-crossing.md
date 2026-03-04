@@ -757,18 +757,7 @@ Expected output:
 
 The CDC check line confirms that all domain crossings are properly synchronized. If you accidentally read a `'tx_domain` signal directly in the `on(sys_clk.rise)` block — even in a deeply nested conditional — the build fails immediately.
 
-To simulate with multiple clocks:
-
-```bash
-skalp sim --entity UartDualClock \
-    --clock sys_clk=100MHz \
-    --clock tx_clk=50MHz \
-    --clock rx_clk=50MHz \
-    --cycles 50000 \
-    --vcd build/uart_dual_clock.vcd
-```
-
-In the waveform viewer, verify:
+To capture waveforms of the multi-clock design, add `tb.export_waveform("build/uart_dual_clock.skw.gz").unwrap();` at the end of a test. Open the `.skw.gz` file in the skalp VS Code extension and verify:
 
 1. Data written on `sys_clk` appears in the TX FIFO after the Gray code pointer synchronization latency (2-3 `tx_clk` cycles).
 2. The TX module reads from the FIFO and serializes the data on `tx_clk`.

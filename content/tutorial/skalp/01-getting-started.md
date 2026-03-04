@@ -161,23 +161,15 @@ If everything is correct, you will see output like:
 
 The compiler parses `counter.sk`, type-checks it, lowers it through HIR and MIR, and generates synthesizable SystemVerilog in the `build/` directory. You can inspect `build/counter.sv` to see what the compiler produced — it will be a straightforward `module` with `always_ff` and `assign` statements.
 
-### Simulating
+### Viewing Waveforms
 
-skalp includes a built-in simulator. Create a simple test stimulus by running:
+To capture waveforms for debugging, add an `export_waveform` call at the end of a test:
 
-```bash
-skalp sim --entity Counter --cycles 300
+```rust
+tb.export_waveform("build/counter.skw.gz").unwrap();
 ```
 
-This runs 300 clock cycles with default stimulus (reset asserted for the first 10 cycles, then released). The `enable` input defaults to high. You should see the counter increment from 0 to 255, overflow pulse once, then wrap to 0 and continue counting.
-
-To see waveforms:
-
-```bash
-skalp sim --entity Counter --cycles 300 --vcd build/counter.vcd
-```
-
-This writes a VCD file you can open in GTKWave or any waveform viewer. You will see `count` ramping up, `overflow` pulsing at 255, and the wrap-around behavior.
+This writes a `.skw.gz` file (skalp's native compressed waveform format) that you can open in the skalp VS Code extension. You will see `count` ramping up, `overflow` pulsing at 255, and the wrap-around behavior.
 
 ### Common Errors
 

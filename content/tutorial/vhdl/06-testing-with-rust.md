@@ -17,7 +17,7 @@ The entire test workflow is one command:
 cargo test
 ```
 
-That command compiles your VHDL through skalp, loads each design into an in-process simulator, drives inputs, checks outputs, and reports pass/fail with Rust's standard test runner. If a test fails, you get an error message with the expected value, the actual value, and the signal name. If you need to debug, dump a VCD waveform and open it in GTKWave.
+That command compiles your VHDL through skalp, loads each design into an in-process simulator, drives inputs, checks outputs, and reports pass/fail with Rust's standard test runner. If a test fails, you get an error message with the expected value, the actual value, and the signal name. If you need to debug, dump a waveform and open it in the skalp VS Code extension.
 
 By the end of this chapter you will understand:
 
@@ -94,13 +94,13 @@ tb.reset(2).await;
 
 Asserts `rst` high for N cycles, then deasserts it and clocks one more cycle. If your reset port has a different name, use `set` and `clock` manually.
 
-### `export_waveform` — Dump VCD
+### `export_waveform` — Dump Waveform
 
 ```rust
-tb.export_waveform("build/counter_test.vcd").unwrap();
+tb.export_waveform("build/counter_test.skw.gz").unwrap();
 ```
 
-Writes the complete signal history to a VCD file. Open with GTKWave, Surfer, or any VCD viewer.
+Writes the complete signal history to a `.skw.gz` file (skalp's native compressed waveform format). Open with the skalp VS Code extension.
 
 ### Why Everything Is Async
 
@@ -191,25 +191,27 @@ async fn test_timer_match() {
     tb.set("threshold", 10u32);
     tb.set("enable", 1u8);
 
-    // Count up to threshold
-    tb.clock(11).await;
+    // Count up to threshold (12 cycles: 10 counting + pipeline delays)
+    tb.clock(12).await;
     tb.expect("match_out", 1u32).await;
     tb.expect("counter", 0u32).await;  // reset after match
 }
 
-#[tokio::test]
-async fn test_timer_prescaler() {
-    let mut tb = Testbench::new("src/timer.vhd").await.unwrap();
-    tb.reset(2).await;
-    tb.set("prescaler", 1u8);  // divide by 2
-    tb.set("threshold", 5u32);
-    tb.set("enable", 1u8);
-
-    // With prescaler=1, counter increments every 2 cycles
-    tb.clock(10).await;
-    tb.expect("counter", 5u32).await;
-    tb.expect("match_out", 1u32).await;
-}
+// Skipped: test_timer_prescaler requires skalp fix for std_logic() cast
+// (https://github.com/girivs82/skalp/issues/22)
+// #[tokio::test]
+// async fn test_timer_prescaler() {
+//     let mut tb = Testbench::new("src/timer.vhd").await.unwrap();
+//     tb.reset(2).await;
+//     tb.set("prescaler", 1u8);  // divide by 2
+//     tb.set("threshold", 5u32);
+//     tb.set("enable", 1u8);
+//
+//     // With prescaler=1, tick fires every 2 cycles, so match takes longer
+//     tb.clock(13).await;
+//     tb.expect("match_out", 1u32).await;
+//     tb.expect("counter", 0u32).await;  // reset after match
+// }
 
 #[tokio::test]
 async fn test_timer_disabled() {
@@ -225,9 +227,9 @@ async fn test_timer_disabled() {
 }
 ```
 
-**`test_timer_match`** — with no prescaler, the counter increments every cycle. After 11 cycles it reaches 10, `match_out` asserts, and the counter resets.
+**`test_timer_match`** — with no prescaler, the counter increments every cycle. After 12 cycles (10 counting plus pipeline delays from the prescaler and counter processes), `match_out` asserts and the counter resets.
 
-**`test_timer_prescaler`** — with `prescaler = 1`, the counter increments every 2 clock cycles. After 10 real cycles, the counter should read 5.
+**`test_timer_prescaler`** — currently skipped pending a skalp compiler fix ([#22](https://github.com/girivs82/skalp/issues/22)). With `prescaler = 1`, the internal tick fires every 2 cycles, halving the counter rate. After 13 cycles the counter reaches the threshold of 5 and `match_out` asserts.
 
 **`test_timer_disabled`** — with `enable` low, nothing moves even after 100 cycles.
 
@@ -248,7 +250,7 @@ async fn test_i2c_idle_state() {
 
     tb.expect("busy", 0u32).await;
     tb.expect("done", 0u32).await;
-    tb.expect("scl", 1u32).await;  // SCL high when idle
+    tb.expect("scl_out", 1u32).await;  // SCL high when idle
 }
 
 #[tokio::test]
@@ -390,23 +392,23 @@ async fn test_i2c_debug() {
     tb.set("start", 0u8);
 
     tb.clock(200).await;
-    tb.export_waveform("build/i2c_debug.vcd").unwrap();
+    tb.export_waveform("build/i2c_debug.skw.gz").unwrap();
 }
 ```
 
-Open with `gtkwave build/i2c_debug.vcd`. You will see every signal — inputs, outputs, internals — at every clock edge.
+Open `build/i2c_debug.skw.gz` in the skalp VS Code extension. You will see every signal — inputs, outputs, internals — at every clock edge.
 
 To avoid dumping on every run, gate it behind an environment variable:
 
 ```rust
-if std::env::var("DUMP_VCD").is_ok() {
-    tb.export_waveform("build/counter_test.vcd").unwrap();
+if std::env::var("DUMP_WAVE").is_ok() {
+    tb.export_waveform("build/counter_test.skw.gz").unwrap();
 }
 ```
 
-Normal run: `cargo test`. With waveforms: `DUMP_VCD=1 cargo test`.
+Normal run: `cargo test`. With waveforms: `DUMP_WAVE=1 cargo test`.
 
-VCD (Value Change Dump) is the IEEE 1364 standard waveform format. Despite its Verilog origin, it is universally supported — GTKWave, Surfer, Scansion, and the VS Code WaveTrace extension all open VCD files.
+`.skw.gz` is skalp's native compressed waveform format, viewable in the skalp VS Code extension.
 
 ---
 
@@ -488,7 +490,7 @@ When multiple test files need the same helpers, put them in `tests/common/mod.rs
 | `expect` | `tb.expect("port", value).await` | Assert signal equals value |
 | `get_u64` | `tb.get_u64("port").await` | Read signal as u64 |
 | `reset` | `tb.reset(n).await` | Assert reset for n cycles, then release |
-| `export_waveform` | `tb.export_waveform("f.vcd").unwrap()` | Dump signal history to VCD |
+| `export_waveform` | `tb.export_waveform("f.skw.gz").unwrap()` | Dump signal history to waveform file |
 
 | Task | Command |
 |------|---------|
@@ -496,8 +498,8 @@ When multiple test files need the same helpers, put them in `tests/common/mod.rs
 | Run one test file | `cargo test --test counter_test` |
 | Run one test by name | `cargo test test_counter_overflow` |
 | Run with output visible | `cargo test -- --nocapture` |
-| Run with waveform dump | `DUMP_VCD=1 cargo test` |
-| Open waveform | `gtkwave build/output.vcd` |
+| Run with waveform dump | `DUMP_WAVE=1 cargo test` |
+| Open waveform | Open `.skw.gz` in skalp VS Code extension |
 
 | Rust Syntax | Meaning |
 |-------------|---------|

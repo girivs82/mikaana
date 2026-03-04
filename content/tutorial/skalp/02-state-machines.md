@@ -329,15 +329,9 @@ Expected output:
        Built UartTx -> build/uart_tx.sv
 ```
 
-### Simulating a Byte Transmission
+### Inspecting a Byte Transmission
 
-Run a simulation that sends one byte (0x55 = 01010101 in binary, a useful test pattern because the bits alternate):
-
-```bash
-skalp sim --entity UartTx --cycles 5000 --vcd build/uart_tx.vcd
-```
-
-In the waveform viewer, you should see:
+To capture waveforms of a byte transmission, add `tb.export_waveform("build/uart_tx.skw.gz").unwrap();` at the end of a test. Open the `.skw.gz` file in the skalp VS Code extension. Using 0x55 (01010101 in binary) as a test pattern (useful because the bits alternate), you should see:
 
 1. **Reset phase** (cycles 0-10): `state` = 0, `tx` = 1 (idle high)
 2. **Start bit** (cycles ~11-444): `tx` drops to 0 for 434 cycles

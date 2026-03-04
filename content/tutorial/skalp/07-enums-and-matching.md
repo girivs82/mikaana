@@ -562,13 +562,7 @@ skalp build src/alu.sk
 #      --> src/alu.sk:38:5
 ```
 
-Run the simulation to verify the refactored UART still works:
-
-```bash
-skalp sim --entity UartTop --cycles 50000 --vcd build/uart_enum.vcd
-```
-
-Open the VCD in GTKWave. The `state` signals now show enum variant names instead of raw integers, making waveform debugging significantly easier.
+To verify the refactored UART visually, add `tb.export_waveform("build/uart_enum.skw.gz").unwrap();` at the end of a test. Open the `.skw.gz` file in the skalp VS Code extension. The `state` signals now show enum variant names instead of raw integers, making waveform debugging significantly easier.
 
 To test the command parser specifically:
 

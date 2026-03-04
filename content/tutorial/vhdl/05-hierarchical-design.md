@@ -285,14 +285,6 @@ Expected output:
 
 Notice that skalp analyzes all three entities — it follows the hierarchy from `bus_system` through its instantiations.
 
-### Simulating
-
-```bash
-skalp sim --entity bus_system --cycles 20 --vcd build/bus_system.vcd
-```
-
-By default, `trigger` starts low and `tx_data` is zero. To see interesting behavior, use the testbench below.
-
 ---
 
 ## Testing the Design

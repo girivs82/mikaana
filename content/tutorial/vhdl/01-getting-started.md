@@ -17,7 +17,6 @@ By the end of this chapter you will understand:
 
 - How to set up a skalp project for VHDL with `skalp.toml`
 - How `skalp build` compiles `.vhd` files just like `.sk` files
-- How `skalp sim` runs your VHDL design and produces VCD waveforms
 - How to write a Rust testbench that drives inputs and checks outputs
 - The VHDL constructs used in the counter: `entity`, `architecture`, `process`, `rising_edge`, `signal`, `std_logic`, `unsigned`, and `(others => '0')`
 
@@ -167,28 +166,6 @@ If everything is correct, you will see output like:
 
 The compiler parses `counter.vhd`, resolves the library references, type-checks the design, and produces an analyzed output in `build/`. The build step validates that your VHDL is correct — any syntax errors, type mismatches, or undeclared signals are reported here with source-level diagnostics pointing to the exact line and column.
 
-### Simulating
-
-skalp includes a built-in simulator. Run the counter for 300 cycles:
-
-```bash
-skalp sim --entity counter --cycles 300
-```
-
-This runs 300 clock cycles with default stimulus: reset is asserted for the first 10 cycles, then released. The `en` input defaults to high. You should see the counter increment from 0 upward.
-
-To capture waveforms for viewing in GTKWave or any VCD-compatible viewer:
-
-```bash
-skalp sim --entity counter --cycles 300 --vcd build/counter.vcd
-```
-
-Open `build/counter.vcd` in your waveform viewer. You will see:
-
-1. **Reset phase** (cycles 0-10): `count` stays at 0, `rst` is high
-2. **Counting phase** (cycles 11-265): `count` ramps from 0 to 255
-3. **Wrap-around** (cycle 266): `count` returns to 0 and continues counting
-
 ### Common Errors
 
 If you see `error: port 'count' is never driven`, the concurrent assignment `count <= count_reg;` is missing or misplaced. It must appear inside the `begin...end` of the architecture, outside the process.
@@ -265,8 +242,7 @@ test result: ok. 1 passed; 0 finished in 0.12s
 | Library import | `library ieee; use ieee.std_logic_1164.all;` | — |
 | VHDL project | — | `lang = "vhdl"` in `[build]` section |
 | Build | — | `skalp build` |
-| Simulate | — | `skalp sim --entity name --cycles N` |
-| Waveform dump | — | `skalp sim --vcd build/out.vcd` |
+| Waveform dump | — | `tb.export_waveform("build/out.skw.gz")` in Rust test |
 | Source directory | `.vhd` files in `src/` | — |
 | Run tests | — | `cargo test` |
 

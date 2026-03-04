@@ -368,13 +368,7 @@ You should see the compiler discover all source files, resolve the imports, and 
 
 Inspect the generated `build/uart_top.sv`. You will see a standard SystemVerilog module with the individual ports: `tx_data`, `tx_write`, `rx_data`, `rx_read`, the status outputs, and the physical UART pins. The sub-entity instances are flattened — their internal signals become prefixed signals in the parent.
 
-Run a basic simulation to verify connectivity:
-
-```bash
-skalp sim --entity UartTop --cycles 5000 --vcd build/uart_top.vcd
-```
-
-Open the VCD in a waveform viewer and confirm that writing a byte to `tx_data` with `tx_write` high causes the byte to appear on the `tx` pin after FIFO and baud-rate delays. Send a serial byte on the `rx` pin and confirm it appears on `rx_data` after the RX FSM completes.
+To verify connectivity visually, add `tb.export_waveform("build/uart_top.skw.gz").unwrap();` at the end of a test. Open the `.skw.gz` file in the skalp VS Code extension and confirm that writing a byte to `tx_data` with `tx_write` high causes the byte to appear on the `tx` pin after FIFO and baud-rate delays. Send a serial byte on the `rx` pin and confirm it appears on `rx_data` after the RX FSM completes.
 
 If you see `error: port 'tx_start' not connected`, you forgot to wire one of the sub-entity's input ports. The compiler enforces that every input port has a connection — there are no implicit defaults.
 

@@ -110,14 +110,14 @@ Two processes follow. Each is a separate concurrent block -- they do not execute
                 match_flag <= '0';
                 overflow   <= '0';
             elsif tick = '1' then
-                if cnt_reg = unsigned(threshold) then
-                    cnt_reg    <= (others => '0');
-                    match_flag <= '1';
-                    overflow   <= '0';
-                elsif cnt_reg = X"FF" then
+                if cnt_reg = X"FF" then
                     cnt_reg    <= (others => '0');
                     match_flag <= '0';
                     overflow   <= '1';
+                elsif cnt_reg = unsigned(threshold) then
+                    cnt_reg    <= (others => '0');
+                    match_flag <= '1';
+                    overflow   <= '0';
                 else
                     cnt_reg    <= cnt_reg + 1;
                     match_flag <= '0';
@@ -135,7 +135,7 @@ Two processes follow. Each is a separate concurrent block -- they do not execute
 
 **Hex literals: `X"FF"`.** VHDL hex literals use the `X"..."` syntax. `X"FF"` is an 8-bit value, all ones -- the maximum for an unsigned byte. The width is inferred from context (the comparison with `cnt_reg`).
 
-**Multiple conditions.** The `if/elsif/else` chain inside `tick = '1'` checks three cases: threshold match, overflow, and normal increment. Each branch explicitly assigns all three outputs (`cnt_reg`, `match_flag`, `overflow`) to avoid inferred latches.
+**Multiple conditions.** The `if/elsif/else` chain inside `tick = '1'` checks three cases: overflow, threshold match, and normal increment. The overflow check comes first so that when the counter reaches `X"FF"`, it overflows regardless of the threshold value. Each branch explicitly assigns all three outputs (`cnt_reg`, `match_flag`, `overflow`) to avoid inferred latches.
 
 ### Output Assignments
 
@@ -379,41 +379,45 @@ Both should compile without errors. If you see type mismatch warnings, check tha
 Create `tests/timer_test.rs`:
 
 ```rust
-use skalp_testing::prelude::*;
+use skalp_testing::Testbench;
 
-#[skalp_test("src/timer.vhd")]
-async fn timer_counts_without_prescaler(tb: &mut Testbench) {
+#[tokio::test]
+async fn test_timer_counts_without_prescaler() {
+    let mut tb = Testbench::new("src/timer.vhd").await.unwrap();
+
     // Reset
-    tb.set("rst", 1);
-    tb.set("enable", 0);
-    tb.set("prescaler", 0b0000);   // No prescaler division
-    tb.set("threshold", 0x0A);     // Match at 10
+    tb.set("rst", 1u8);
+    tb.set("enable", 0u8);
+    tb.set("prescaler", 0b0000u8);   // No prescaler division
+    tb.set("threshold", 0x0Au8);     // Match at 10
     tb.clock(2).await;
 
     // Release reset, enable counting
-    tb.set("rst", 0);
-    tb.set("enable", 1);
+    tb.set("rst", 0u8);
+    tb.set("enable", 1u8);
 
-    // Clock 10 cycles -- counter should reach threshold
-    tb.clock(10).await;
-    tb.expect("match_out", 1);
-    tb.expect("counter", 0);   // Resets to 0 on match
+    // Clock 12 cycles -- 1 for prescaler startup, 10 counting, 1 match trigger
+    tb.clock(12).await;
+    tb.expect("match_out", 1u8).await;
+    tb.expect("counter", 0u8).await;   // Resets to 0 on match
 }
 
-#[skalp_test("src/timer.vhd")]
-async fn timer_overflow(tb: &mut Testbench) {
-    tb.set("rst", 1);
-    tb.set("enable", 0);
-    tb.set("prescaler", 0b0000);
-    tb.set("threshold", 0xFF);     // Threshold at max -- will never match before overflow
+#[tokio::test]
+async fn test_timer_overflow() {
+    let mut tb = Testbench::new("src/timer.vhd").await.unwrap();
+
+    tb.set("rst", 1u8);
+    tb.set("enable", 0u8);
+    tb.set("prescaler", 0b0000u8);
+    tb.set("threshold", 0xFFu8);     // Threshold at max -- will never match before overflow
     tb.clock(2).await;
 
-    tb.set("rst", 0);
-    tb.set("enable", 1);
+    tb.set("rst", 0u8);
+    tb.set("enable", 1u8);
 
-    // Clock 256 cycles to overflow an 8-bit counter
-    tb.clock(256).await;
-    tb.expect("overflow", 1);
+    // Clock 257 cycles -- 1 prescaler startup + 255 counting + 1 overflow trigger
+    tb.clock(257).await;
+    tb.expect("overflow", 1u8).await;
 }
 ```
 
@@ -423,68 +427,74 @@ Run with:
 cargo test --test timer_test
 ```
 
-The first test sets `prescaler` to `"0000"` (tick every cycle) and `threshold` to 10. After 10 clocks, `match_out` should pulse and the counter should reset. The second test sets the threshold to the maximum and clocks through 256 cycles to trigger overflow.
+The first test sets `prescaler` to `"0000"` (tick every cycle) and `threshold` to 10. After 12 clocks (1 cycle for the prescaler to produce the first tick, 10 cycles of counting, and 1 cycle for the match to trigger), `match_out` should pulse and the counter should reset. The second test sets the threshold to the maximum and clocks through 257 cycles to trigger overflow -- since the overflow check has priority over the threshold match, the counter overflows at `0xFF` instead of matching.
 
 ### Testbench 2: I2C FSM
 
 Create `tests/i2c_fsm_test.rs`:
 
 ```rust
-use skalp_testing::prelude::*;
+use skalp_testing::Testbench;
 
-#[skalp_test("src/i2c_fsm.vhd")]
-async fn i2c_start_transfer(tb: &mut Testbench) {
+#[tokio::test]
+async fn test_i2c_start_transfer() {
+    let mut tb = Testbench::new("src/i2c_fsm.vhd").await.unwrap();
+
     // Reset
-    tb.set("rst", 1);
-    tb.set("start", 0);
-    tb.set("stop", 0);
-    tb.set("wr_data", 0xA5);
-    tb.set("sda_in", 1);
+    tb.set("rst", 1u8);
+    tb.set("start", 0u8);
+    tb.set("stop", 0u8);
+    tb.set("wr_data", 0xA5u8);
+    tb.set("sda_in", 1u8);
     tb.clock(2).await;
 
     // Release reset
-    tb.set("rst", 0);
+    tb.set("rst", 0u8);
     tb.clock(1).await;
 
     // Should be idle
-    tb.expect("busy", 0);
-    tb.expect("done", 0);
+    tb.expect("busy", 0u8).await;
+    tb.expect("done", 0u8).await;
 
     // Start a transfer
-    tb.set("start", 1);
+    tb.set("start", 1u8);
     tb.clock(1).await;
-    tb.set("start", 0);
+    tb.set("start", 0u8);
 
     // Should be busy now
-    tb.expect("busy", 1);
+    tb.expect("busy", 1u8).await;
 }
 
-#[skalp_test("src/i2c_fsm.vhd")]
-async fn i2c_completes_transfer(tb: &mut Testbench) {
+#[tokio::test]
+async fn test_i2c_completes_transfer() {
+    let mut tb = Testbench::new("src/i2c_fsm.vhd").await.unwrap();
+
     // Reset and start
-    tb.set("rst", 1);
-    tb.set("start", 0);
-    tb.set("stop", 1);           // Request stop after data
-    tb.set("wr_data", 0x55);
-    tb.set("sda_in", 0);         // ACK = 0
+    tb.set("rst", 1u8);
+    tb.set("start", 0u8);
+    tb.set("stop", 1u8);           // Request stop after data
+    tb.set("wr_data", 0x55u8);
+    tb.set("sda_in", 0u8);         // ACK = 0
     tb.clock(2).await;
 
-    tb.set("rst", 0);
+    tb.set("rst", 0u8);
     tb.clock(1).await;
 
     // Trigger transfer
-    tb.set("start", 1);
+    tb.set("start", 1u8);
     tb.clock(1).await;
-    tb.set("start", 0);
+    tb.set("start", 0u8);
 
-    // Clock enough cycles for the full transfer:
-    // 1 start + 8 data bits * 16 clk_div * 4 phases + ACK + STOP
-    // Use generous margin
-    tb.clock(600).await;
-
-    // Should have completed
-    tb.expect("busy", 0);
-    tb.expect("done", 1);
+    // Poll for completion -- done is a single-cycle pulse,
+    // so we must check every cycle
+    for _ in 0..1000 {
+        tb.clock(1).await;
+        if tb.get_u64("done").await == 1 {
+            break;
+        }
+    }
+    tb.expect("done", 1u8).await;
+    tb.expect("busy", 0u8).await;
 }
 ```
 
@@ -494,15 +504,15 @@ Run with:
 cargo test --test i2c_fsm_test
 ```
 
-The first test verifies that asserting `start` transitions the FSM out of idle and sets `busy` high. The second test runs a complete transfer cycle -- start, 8 data bits, ACK, stop -- and checks that `done` pulses at the end.
+The first test verifies that asserting `start` transitions the FSM out of idle and sets `busy` high. The second test runs a complete transfer cycle -- start, 8 data bits, ACK, stop -- and polls for the `done` signal. Because `done` is a single-cycle pulse (the FSM returns to idle on the very next clock), the test must check every cycle rather than clocking a fixed number of cycles and then checking.
 
-To see waveforms for either test:
+To capture waveforms for debugging, add an `export_waveform` call to your test:
 
-```bash
-skalp sim src/i2c_fsm.vhd --vcd i2c.vcd
+```rust
+tb.export_waveform("build/i2c_fsm.skw.gz").unwrap();
 ```
 
-Open the VCD file in the VS Code skalp extension or any waveform viewer. The `state` signal will display symbolic names (`ST_IDLE`, `ST_DATA`, etc.) if your viewer supports VHDL enumerations.
+Open the `.skw.gz` file in the skalp VS Code extension. The `state` signal will display symbolic names (`ST_IDLE`, `ST_DATA`, etc.).
 
 ---
 

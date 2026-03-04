@@ -107,6 +107,212 @@ The TX path uses a strobe/acknowledge handshake: the upstream logic asserts `dat
 
 The architecture contains multiple named processes: `oversample_clock_divider` (16x baud tick), `rxd_synchronise` (two-stage synchronizer), `rxd_filter` (digital low-pass), `uart_receive_data` (RX FSM), and `uart_send_data` (TX FSM and baud generator). Named processes appear in skalp's diagnostic output, making it easy to locate issues.
 
+### Complete Architecture
+
+Add the following architecture after the entity in `src/uart.vhd`:
+
+```vhdl
+architecture rtl of uart is
+    constant c_tx_div       : integer := clock_frequency / baud;
+    constant c_tx_div_width : integer := integer(log2(real(c_tx_div))) + 1;
+    constant c_rx_div       : integer := clock_frequency / (baud * 16);
+    constant c_rx_div_width : integer := integer(log2(real(c_rx_div))) + 1;
+
+    type uart_tx_states is (
+        tx_send_start_bit, tx_send_data, tx_send_stop_bit
+    );
+    type uart_rx_states is (
+        rx_get_start_bit, rx_get_data, rx_get_stop_bit
+    );
+
+    signal uart_tx_state   : uart_tx_states := tx_send_start_bit;
+    signal uart_tx_data    : std_logic_vector(7 downto 0);
+    signal uart_tx_count   : unsigned(c_tx_div_width-1 downto 0);
+    signal uart_tx_bit     : unsigned(2 downto 0);
+
+    signal uart_rx_data_sr : std_logic_vector(1 downto 0) := (others => '1');
+    signal uart_rx_filter  : unsigned(1 downto 0);
+    signal uart_rx_bit     : std_logic := '1';
+
+    signal uart_rx_state   : uart_rx_states := rx_get_start_bit;
+    signal uart_rx_data    : std_logic_vector(7 downto 0);
+    signal uart_rx_count   : unsigned(3 downto 0);
+    signal uart_rx_bit_cnt : unsigned(2 downto 0);
+
+    signal uart_rx_clk_count : unsigned(c_rx_div_width-1 downto 0);
+    signal uart_rx_clk_tick  : std_logic;
+begin
+
+    -- Oversample clock divider (16x baud rate tick)
+    oversample_clock_divider : process(clock)
+    begin
+        if rising_edge(clock) then
+            if reset = '1' then
+                uart_rx_clk_count <= (others => '0');
+                uart_rx_clk_tick  <= '0';
+            else
+                if to_integer(uart_rx_clk_count) = c_rx_div - 1 then
+                    uart_rx_clk_count <= (others => '0');
+                    uart_rx_clk_tick  <= '1';
+                else
+                    uart_rx_clk_count <= uart_rx_clk_count + 1;
+                    uart_rx_clk_tick  <= '0';
+                end if;
+            end if;
+        end if;
+    end process oversample_clock_divider;
+
+    -- Two-stage synchronizer for async RX input
+    rxd_synchronise : process(clock)
+    begin
+        if rising_edge(clock) then
+            if reset = '1' then
+                uart_rx_data_sr <= (others => '1');
+            else
+                uart_rx_data_sr(0) <= rx;
+                uart_rx_data_sr(1) <= uart_rx_data_sr(0);
+            end if;
+        end if;
+    end process rxd_synchronise;
+
+    -- Digital filter on synchronized RX
+    rxd_filter : process(clock)
+    begin
+        if rising_edge(clock) then
+            if reset = '1' then
+                uart_rx_filter <= (others => '0');
+                uart_rx_bit    <= '1';
+            elsif uart_rx_clk_tick = '1' then
+                if uart_rx_data_sr(1) = '1' and uart_rx_filter < 3 then
+                    uart_rx_filter <= uart_rx_filter + 1;
+                elsif uart_rx_data_sr(1) = '0' and uart_rx_filter > 0 then
+                    uart_rx_filter <= uart_rx_filter - 1;
+                end if;
+                if uart_rx_filter = 3 then
+                    uart_rx_bit <= '1';
+                elsif uart_rx_filter = 0 then
+                    uart_rx_bit <= '0';
+                end if;
+            end if;
+        end if;
+    end process rxd_filter;
+
+    -- RX FSM
+    uart_receive_data : process(clock)
+    begin
+        if rising_edge(clock) then
+            if reset = '1' then
+                uart_rx_state       <= rx_get_start_bit;
+                uart_rx_data        <= (others => '0');
+                uart_rx_count       <= (others => '0');
+                uart_rx_bit_cnt     <= (others => '0');
+                data_stream_out     <= (others => '0');
+                data_stream_out_stb <= '0';
+            elsif uart_rx_clk_tick = '1' then
+                case uart_rx_state is
+                    when rx_get_start_bit =>
+                        if uart_rx_bit = '0' then
+                            if uart_rx_count = 7 then
+                                uart_rx_count   <= (others => '0');
+                                uart_rx_bit_cnt <= (others => '0');
+                                uart_rx_state   <= rx_get_data;
+                            else
+                                uart_rx_count <= uart_rx_count + 1;
+                            end if;
+                        else
+                            uart_rx_count <= (others => '0');
+                        end if;
+                    when rx_get_data =>
+                        if uart_rx_count = 15 then
+                            uart_rx_count <= (others => '0');
+                            uart_rx_data(to_integer(uart_rx_bit_cnt)) <= uart_rx_bit;
+                            if uart_rx_bit_cnt = 7 then
+                                uart_rx_state <= rx_get_stop_bit;
+                            else
+                                uart_rx_bit_cnt <= uart_rx_bit_cnt + 1;
+                            end if;
+                        else
+                            uart_rx_count <= uart_rx_count + 1;
+                        end if;
+                    when rx_get_stop_bit =>
+                        if uart_rx_count = 15 then
+                            uart_rx_state       <= rx_get_start_bit;
+                            uart_rx_count       <= (others => '0');
+                            data_stream_out     <= uart_rx_data;
+                            data_stream_out_stb <= '1';
+                        else
+                            uart_rx_count <= uart_rx_count + 1;
+                        end if;
+                end case;
+            end if;
+        end if;
+    end process uart_receive_data;
+
+    -- TX FSM with baud rate generator
+    uart_send_data : process(clock)
+    begin
+        if rising_edge(clock) then
+            if reset = '1' then
+                uart_tx_state      <= tx_send_start_bit;
+                data_stream_in_ack <= '0';
+                tx                 <= '1';
+                uart_tx_count      <= (others => '0');
+                uart_tx_bit        <= (others => '0');
+            else
+                data_stream_in_ack <= '0';
+                case uart_tx_state is
+                    when tx_send_start_bit =>
+                        if data_stream_in_stb = '1' and uart_tx_count = 0 then
+                            uart_tx_data       <= data_stream_in;
+                            data_stream_in_ack <= '1';
+                            tx                 <= '0';
+                            uart_tx_count      <= uart_tx_count + 1;
+                        elsif uart_tx_count /= 0 then
+                            tx <= '0';
+                            if uart_tx_count = c_tx_div - 1 then
+                                uart_tx_count <= (others => '0');
+                                uart_tx_bit   <= (others => '0');
+                                uart_tx_state <= tx_send_data;
+                            else
+                                uart_tx_count <= uart_tx_count + 1;
+                            end if;
+                        else
+                            tx <= '1';
+                        end if;
+                    when tx_send_data =>
+                        tx <= uart_tx_data(to_integer(uart_tx_bit));
+                        if uart_tx_count = c_tx_div - 1 then
+                            uart_tx_count <= (others => '0');
+                            if uart_tx_bit = 7 then
+                                uart_tx_state <= tx_send_stop_bit;
+                            else
+                                uart_tx_bit <= uart_tx_bit + 1;
+                            end if;
+                        else
+                            uart_tx_count <= uart_tx_count + 1;
+                        end if;
+                    when tx_send_stop_bit =>
+                        tx <= '1';
+                        if uart_tx_count = c_tx_div - 1 then
+                            uart_tx_count <= (others => '0');
+                            uart_tx_state <= tx_send_start_bit;
+                        else
+                            uart_tx_count <= uart_tx_count + 1;
+                        end if;
+                end case;
+            end if;
+        end if;
+    end process uart_send_data;
+
+end architecture rtl;
+```
+
+The architecture uses no concurrent signal assignments for output ports -- all outputs (`tx`, `data_stream_in_ack`, `data_stream_out`, `data_stream_out_stb`) are driven directly from their respective processes. This avoids pipeline delays that concurrent assignments can introduce in simulation.
+
+The `tx_send_start_bit` state doubles as the idle state: when `uart_tx_count = 0` and no strobe is present, the TX line idles high. When the strobe arrives, the FSM accepts the byte, starts the start bit, and begins counting. When `uart_tx_count` is non-zero, the start bit is in progress.
+
+With the default generics (`clock_frequency = 153600`, `baud = 9600`), `c_tx_div = 16` and `c_rx_div = 1`. One TX bit takes 16 system clocks (start + 8 data + stop = 160 total). The RX oversample tick fires every system clock, so 16 ticks = 1 bit period.
+
 ---
 
 ## skalp Pragmas
@@ -124,7 +330,7 @@ Pragmas can appear on signal declarations, process labels, or standalone comment
 
 ### `-- skalp:trace` -- Debug Visibility
 
-The `trace` pragma marks a signal for inclusion in debug output. When you run `skalp sim` with waveform capture, traced signals are always included even if the simulator would otherwise optimize them away. When you synthesize for an FPGA with `skalp build --target`, traced signals are connected to the on-chip logic analyzer.
+The `trace` pragma marks a signal for inclusion in debug output. When you export waveforms with `tb.export_waveform()` in a Rust test, traced signals are always included even if the simulator would otherwise optimize them away. When you synthesize for an FPGA with `skalp build --target`, traced signals are connected to the on-chip logic analyzer.
 
 Apply it to the UART state machines:
 
@@ -133,9 +339,9 @@ signal uart_tx_state : uart_tx_states := tx_send_start_bit; -- skalp:trace
 signal uart_rx_state : uart_rx_states := rx_get_start_bit;  -- skalp:trace
 ```
 
-Now `skalp sim --vcd` will always include `uart_tx_state` and `uart_rx_state` in the VCD file, and `skalp build --target ice40` will route these signals to the debug fabric.
+Now `tb.export_waveform()` will always include `uart_tx_state` and `uart_rx_state` in the waveform file, and `skalp build --target ice40` will route these signals to the debug fabric.
 
-You can trace any signal -- not just state machines. For high-fanout buses or deeply nested signals that are hard to find in a full waveform dump, `-- skalp:trace` is the simplest way to guarantee visibility.
+You can trace any signal — not just state machines. For high-fanout buses or deeply nested signals that are hard to find in a full waveform dump, `-- skalp:trace` is the simplest way to guarantee visibility.
 
 ### `-- skalp:cdc(sync)` -- Clock Domain Crossing
 
@@ -194,7 +400,7 @@ assert uart_tx_state /= tx_send_start_bit or data_stream_in_stb = '0'
     report "TX started unexpectedly" severity note;
 ```
 
-During `skalp sim`, when the assertion condition fails, the simulator pauses and drops into the skalp debugger (or halts if non-interactive). You can inspect signal values, step forward, or resume.
+During simulation (via `cargo test`), when the assertion condition fails, the simulator pauses and drops into the skalp debugger (or halts if non-interactive). You can inspect signal values, step forward, or resume.
 
 ### Summary of Pragmas
 
@@ -463,15 +669,24 @@ use skalp_testing::Testbench;
 #[tokio::test]
 async fn test_uart_tx() {
     let mut tb = Testbench::new("src/uart.vhd").await.unwrap();
-    tb.reset(2).await;
+
+    // Reset — this UART uses "clock" and "reset", not "clk"/"rst",
+    // so we drive reset manually and use clock_signal("clock", n)
+    tb.set("reset", 1u8)
+        .set("data_stream_in", 0u8)
+        .set("data_stream_in_stb", 0u8)
+        .set("rx", 1u8);
+    tb.clock_signal("clock", 4).await;
+    tb.set("reset", 0u8);
+    tb.clock_signal("clock", 5).await;
 
     // Send a byte (0x55 = alternating bits, good for baud rate testing)
-    tb.set("data_stream_in", 0x55u32);
-    tb.set("data_stream_in_stb", 1u8);
+    tb.set("data_stream_in", 0x55u32)
+        .set("data_stream_in_stb", 1u8);
 
     // Wait for acknowledgment
     for _ in 0..100 {
-        tb.clock(1).await;
+        tb.clock_signal("clock", 1).await;
         if tb.get_u64("data_stream_in_ack").await == 1 {
             break;
         }
@@ -480,9 +695,11 @@ async fn test_uart_tx() {
     tb.set("data_stream_in_stb", 0u8);
 
     // Wait for transmission to complete
-    tb.clock(200).await;
+    tb.clock_signal("clock", 200).await;
 }
 ```
+
+Notice `tb.clock_signal("clock", n)` instead of the usual `tb.clock(n)`. The convenience method `tb.clock(n)` assumes the clock port is named `clk`, but this UART entity names it `clock`. The `clock_signal` method lets you specify any clock port name. Similarly, we drive `reset` manually with `tb.set` rather than using `tb.reset()` (which assumes `rst`).
 
 The test resets, presents a byte with the strobe, polls for acknowledgment (the loop avoids hardcoding cycle counts), deasserts the strobe, and waits for the transmission to complete. With default generics (153600 Hz clock, 9600 baud), one byte takes 16 cycles/bit times 10 bits = 160 cycles.
 
@@ -492,30 +709,34 @@ The test resets, presents a byte with the strobe, polls for acknowledgment (the 
 #[tokio::test]
 async fn test_uart_rx() {
     let mut tb = Testbench::new("src/uart.vhd").await.unwrap();
-    tb.reset(2).await;
 
-    // The rx line idles high
-    tb.set("rx", 1u8);
-    tb.clock(10).await;
+    // Reset with explicit clock/reset port names
+    tb.set("reset", 1u8)
+        .set("data_stream_in", 0u8)
+        .set("data_stream_in_stb", 0u8)
+        .set("rx", 1u8);
+    tb.clock_signal("clock", 4).await;
+    tb.set("reset", 0u8);
+    tb.clock_signal("clock", 4).await;
 
     // Send start bit (low)
     tb.set("rx", 0u8);
-    tb.clock(16).await; // One bit period at 16x oversample
+    tb.clock_signal("clock", 16).await; // One bit period at 16x oversample
 
     // Send 0x55 = 01010101, LSB first
     let byte: u8 = 0x55;
     for i in 0..8 {
         let bit = (byte >> i) & 1;
         tb.set("rx", bit);
-        tb.clock(16).await;
+        tb.clock_signal("clock", 16).await;
     }
 
     // Send stop bit (high)
     tb.set("rx", 1u8);
-    tb.clock(16).await;
+    tb.clock_signal("clock", 16).await;
 
     // Check that the received byte is available
-    tb.clock(10).await; // Allow pipeline to settle
+    tb.clock_signal("clock", 10).await; // Allow pipeline to settle
     tb.expect("data_stream_out_stb", 1u32).await;
     tb.expect("data_stream_out", 0x55u32).await;
 }
@@ -531,11 +752,11 @@ Combine simulation tests with formal verification: `cargo test` verifies the UAR
 
 | Feature | Syntax | Command |
 |---------|--------|---------|
-| Trace a signal | `-- skalp:trace` | Visible in `skalp sim --vcd` output |
+| Trace a signal | `-- skalp:trace` | Visible in `export_waveform` output |
 | CDC annotation | `-- skalp:cdc(sync)` | Checked during `skalp build` |
 | TMR protection | `-- skalp:safety(tmr)` | Applied during `skalp build` |
 | ECC protection | `-- skalp:safety(ecc)` | Applied during `skalp build` |
-| Simulation breakpoint | `-- skalp:breakpoint` | Triggers during `skalp sim` |
+| Simulation breakpoint | `-- skalp:breakpoint` | Triggers during simulation |
 | Formal assertion | `-- skalp:formal` | Checked by `skalp verify` |
 | Formal liveness | `-- skalp:formal_type(liveness)` | Checked by `skalp verify` |
 | Mixed sources | `sources = ["src/*.sk", "src/*.vhd"]` | In `skalp.toml` `[build]` section |
@@ -546,7 +767,7 @@ Combine simulation tests with formal verification: `cargo test` verifies the UAR
 
 ---
 
-**Exercise:** Add `-- skalp:trace` to the baud rate counters. Run `skalp sim --vcd` and verify in GTKWave that the TX counter period matches `clock_frequency / baud`. Then write a formal property asserting the TX line is never low for more than 10 bit periods (hint: you need an auxiliary counter).
+**Exercise:** Add `-- skalp:trace` to the baud rate counters. Export waveforms with `tb.export_waveform("build/uart_baud.skw.gz")` in a Rust test and verify in the skalp VS Code extension that the TX counter period matches `clock_frequency / baud`. Then write a formal property asserting the TX line is never low for more than 10 bit periods (hint: you need an auxiliary counter).
 
 ---
 

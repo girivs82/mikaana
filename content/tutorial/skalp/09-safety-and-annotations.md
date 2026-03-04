@@ -147,7 +147,7 @@ impl TmrCounter {
     // ... (counter logic from above)
 
     // Trace annotations group signals for waveform display.
-    // When you open the generated VCD in a waveform viewer,
+    // When you open the exported waveform in the skalp VS Code extension,
     // signals with the same group appear together.
 
     #[trace(group = "tmr_internals", display_name = "Copy A")]
@@ -171,9 +171,9 @@ impl TmrCounter {
 }
 ```
 
-**`#[trace(group = "tmr_internals", display_name = "Copy A")]`** controls how this signal appears in the waveform viewer. The `group` field organizes related signals into a named folder. The `display_name` field overrides the signal's HDL name with a human-readable label. The optional `radix` field controls the display format: `hex`, `bin`, `dec`, or `unsigned`. When you generate a VCD file and open it, the viewer automatically groups these signals together with their display names.
+**`#[trace(group = "tmr_internals", display_name = "Copy A")]`** controls how this signal appears in the waveform viewer. The `group` field organizes related signals into a named folder. The `display_name` field overrides the signal's HDL name with a human-readable label. The optional `radix` field controls the display format: `hex`, `bin`, `dec`, or `unsigned`. When you export waveforms and open the `.skw.gz` file, the viewer automatically groups these signals together with their display names.
 
-The key difference from traditional waveform setup: in SystemVerilog, waveform grouping lives in the simulator's GUI configuration file. Every engineer sets it up manually. When you share a project, each person recreates the signal groups from scratch. In skalp, the grouping travels with the source code. Clone the repo, run the simulation, open the VCD — the groups are already there.
+The key difference from traditional waveform setup: in SystemVerilog, waveform grouping lives in the simulator's GUI configuration file. Every engineer sets it up manually. When you share a project, each person recreates the signal groups from scratch. In skalp, the grouping travels with the source code. Clone the repo, run the tests, open the waveform — the groups are already there.
 
 **`#[breakpoint(is_error = true, name = "TMR_FAULT", message = "...")]`** creates a named simulation stop condition. When `tmr_fault_trigger` goes high during simulation, the simulator halts and prints:
 
@@ -667,7 +667,7 @@ impl UartTop {
     // viewing. They have zero synthesis cost — stripped entirely
     // during compilation. But they make simulation debugging
     // dramatically faster because every engineer who opens the
-    // VCD sees the same organized signal groups.
+    // waveform sees the same organized signal groups.
 
     #[trace(group = "uart_tx", display_name = "TX State")]
     signal tx_state_trace: TxState
@@ -741,7 +741,7 @@ Let us step back and see the full picture of what the annotations provide:
 
 **Sticky error registers.** Parity, frame, and overrun errors are pulsed signals — they go high for one cycle when the error occurs. If the CPU polls the status register at a slower rate, it might miss a transient error. The `#[retention]` sticky registers latch the error and hold it until reset. The `#[retention]` annotation ensures the compiler does not accidentally clear these registers in a code path that should preserve them.
 
-**Organized debug traces.** Three trace groups — `uart_tx`, `uart_rx`, and `uart_errors` — organize the most important signals for debugging. When you open the VCD file, you immediately see the TX state machine, RX data flow, and error conditions without manually hunting through hundreds of signals. This setup is checked into version control and shared by the entire team.
+**Organized debug traces.** Three trace groups — `uart_tx`, `uart_rx`, and `uart_errors` — organize the most important signals for debugging. When you open the waveform file, you immediately see the TX state machine, RX data flow, and error conditions without manually hunting through hundreds of signals. This setup is checked into version control and shared by the entire team.
 
 **Simulation breakpoints.** Two breakpoints trigger during simulation. `FIFO_OVERRUN` halts with an error if the RX FIFO overflows — this is always a bug in the testbench or a design misconfiguration. `FRAME_ERROR` halts with an error on framing violations. `TX_COMPLETE` halts without an error when a transmission finishes — useful for stepping through individual bytes during manual debugging.
 
@@ -780,17 +780,7 @@ skalp fmeda --output build/fmeda_report.csv
 
 This scans the design hierarchy, finds every `#[safety_mechanism]` entity, lists its detection signals, and generates a CSV with fault classifications and coverage percentages. The output can be imported directly into a safety case document or reviewed by a safety engineer.
 
-Run simulation with breakpoints enabled:
-
-```bash
-skalp sim --entity UartTop \
-    --params "CLK_FREQ_HZ=1000,BAUD_RATE=100,FIFO_DEPTH=4" \
-    --cycles 2000 \
-    --breakpoints \
-    --vcd build/uart_safety.vcd
-```
-
-The `--breakpoints` flag enables all `#[breakpoint]` annotations. Without it, breakpoints are ignored and simulation runs to completion. This lets you disable breakpoints for long regression runs and enable them for interactive debugging.
+Run the tests with `cargo test`. Breakpoints defined by `#[breakpoint]` annotations are active during simulation — when a breakpoint condition triggers, the test halts with the breakpoint name and message.
 
 If no faults occur, the simulation runs to completion. If a framing error, parity error, or FIFO overrun occurs, the simulation halts with the breakpoint name and message:
 
@@ -800,7 +790,7 @@ BREAKPOINT FIFO_OVERRUN at cycle 847: RX FIFO overrun — data lost
 Simulation FAILED (breakpoint with is_error = true)
 ```
 
-Open the VCD file in a waveform viewer. You should see three organized groups: `uart_tx` with the TX state and baud tick, `uart_rx` with the RX data and validity, and `uart_errors` with all error signals and sticky registers. No manual viewer configuration needed.
+To inspect waveforms, add `tb.export_waveform("build/uart_safety.skw.gz").unwrap();` at the end of a test. Open the `.skw.gz` file in the skalp VS Code extension. You should see three organized groups: `uart_tx` with the TX state and baud tick, `uart_rx` with the RX data and validity, and `uart_errors` with all error signals and sticky registers. No manual viewer configuration needed.
 
 To run fault injection and verify TMR coverage:
 

@@ -526,24 +526,9 @@ skalp build
 
 You should see all entities compile, with the parameterized UART elaborated at its default parameters. The generated SystemVerilog in `build/uart_top.sv` will have `CYCLES_PER_BIT = 434` inlined as a literal — no parameter at the SV level, because skalp resolves everything at compile time.
 
-To simulate with fast timing, use the `--params` flag:
+To capture waveforms, add `tb.export_waveform("build/uart_fast.skw.gz").unwrap();` at the end of a test. With simulation-friendly timing (e.g., `CLK_FREQ_HZ=1000, BAUD_RATE=100, FIFO_DEPTH=4`), a full TX/RX byte transfer completes in about 100 cycles instead of 4340, so a short test is enough to see multiple bytes transmitted and received.
 
-```bash
-skalp sim --entity UartTop \
-    --params "CLK_FREQ_HZ=1000,BAUD_RATE=100,FIFO_DEPTH=4" \
-    --cycles 500 \
-    --vcd build/uart_fast.vcd
-```
-
-This instantiates the UART with simulation-friendly timing. A full TX/RX byte transfer completes in about 100 cycles instead of 4340, so 500 cycles is enough to see multiple bytes transmitted and received.
-
-Compare with production timing:
-
-```bash
-skalp sim --entity UartTop --cycles 10000 --vcd build/uart_prod.vcd
-```
-
-Open both VCD files in a waveform viewer. The waveforms will look identical in shape — same state transitions, same FIFO behavior — but the fast version compresses time by a factor of 43.
+Compare fast and production timing by exporting waveforms from tests using each parameter set. Open both `.skw.gz` files in the skalp VS Code extension. The waveforms will look identical in shape — same state transitions, same FIFO behavior — but the fast version compresses time by a factor of 43.
 
 ---
 

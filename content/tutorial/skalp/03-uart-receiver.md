@@ -457,7 +457,7 @@ To run a quick simulation, you can compile and test the loopback. We will build 
 cargo test --test ch03_test
 ```
 
-This generates a VCD waveform file. Open it in GTKWave or your preferred viewer and check:
+To capture waveforms, add `tb.export_waveform("build/uart_rx.skw.gz").unwrap();` at the end of the test. Open the `.skw.gz` file in the skalp VS Code extension and check:
 
 1. After asserting `send_en` with a data byte, `tx` (the `serial_wire`) goes low (start bit).
 2. The `rx` module detects the falling edge and enters the START state.

@@ -1,7 +1,7 @@
 ---
 title: "Chapter 10: Testing and Verification"
 date: 2025-07-15
-summary: "Async Rust testbench API -- Testbench::with_top_module(), tb.set(), tb.clock().await, tb.expect().await, tb.get_u64().await. Test organization, helper functions, multiple test cases, waveform generation with VCD, and a complete UART test suite."
+summary: "Async Rust testbench API -- Testbench::with_top_module(), tb.set(), tb.clock().await, tb.expect().await, tb.get_u64().await. Test organization, helper functions, multiple test cases, waveform generation, and a complete UART test suite."
 tags: ["skalp", "tutorial", "hardware", "hdl"]
 weight: 10
 ShowToc: true
@@ -12,7 +12,7 @@ aliases: ["/tutorial/10-testing/"]
 
 You have spent nine chapters building a UART peripheral from scratch: entity declarations, state machines, receivers, FIFOs, parameterization, structs, enums, clock domain crossings, and safety annotations. The design compiles. The compiler has checked your types, your exhaustive matches, your clock domain boundaries, and your safety mechanism coverage. But none of that proves the design does what you intend.
 
-Testing proves intent. The compiler guarantees that your code is well-formed; tests guarantee that your code is correct. In skalp, tests are written in Rust using an async testbench API that drives the simulator. You write ordinary Rust async functions, annotated with `#[tokio::test]`, that set input port values, advance the clock, and assert output port values. The Rust test runner executes them, reports pass/fail, and optionally dumps VCD waveforms for debugging.
+Testing proves intent. The compiler guarantees that your code is well-formed; tests guarantee that your code is correct. In skalp, tests are written in Rust using an async testbench API that drives the simulator. You write ordinary Rust async functions, annotated with `#[tokio::test]`, that set input port values, advance the clock, and assert output port values. The Rust test runner executes them, reports pass/fail, and optionally dumps waveforms for debugging.
 
 By the end of this chapter you will understand:
 
@@ -21,7 +21,7 @@ By the end of this chapter you will understand:
 - How `tb.clock(n).await` advances clock cycles
 - How `tb.expect("port", value).await` asserts signal values with clear error messages
 - How `tb.reset(n).await` asserts and deasserts reset cleanly
-- How `tb.export_waveform("file.vcd")` dumps waveforms for GTKWave debugging
+- How `tb.export_waveform("file.skw.gz")` dumps waveforms for debugging in the skalp VS Code extension
 - How to write async helper functions that abstract protocol-level operations
 - How to organize tests into focused, independent test cases
 - How to run tests with `cargo test`
@@ -136,7 +136,7 @@ Here is the complete reference:
 
 **`tb.reset(n).await`** -- Asserts the reset signal for `n` clock cycles, then deasserts it. Every test should start with `tb.reset(2).await` to put the design in a known state.
 
-**`tb.export_waveform("filename.vcd").unwrap()`** -- Dumps the complete signal history to a VCD file. Call this at any point during the test. You can open the file in GTKWave or any VCD viewer.
+**`tb.export_waveform("filename.skw.gz").unwrap()`** -- Dumps the complete signal history to a `.skw.gz` file (skalp's native compressed waveform format). Call this at any point during the test. Open the file in the skalp VS Code extension.
 
 **`tb.get_input_names()` / `tb.get_output_names()`** -- Returns the list of input/output port names. Useful for debugging when you are not sure what signals are available.
 
@@ -209,7 +209,7 @@ These functions turn low-level port wiggling into protocol-level operations. You
 > | `initial begin ... end` blocks with `#delay` | Async Rust functions with `tb.clock(n).await` | No ambiguous time units; every operation is cycle-accurate |
 > | UVM for industrial verification (1000+ lines of boilerplate) | `#[tokio::test]` with `skalp_testing::Testbench` | A complete test case in 20 lines, not 200 |
 > | `$display` / `$error` for messages | `assert_eq!`, `assert!`, `tb.expect()` with Rust panic messages | Structured error reporting with file/line info |
-> | `$dumpvars` / `$dumpfile` for waveforms | `tb.export_waveform("file.vcd")` | VCD generation without modifying the testbench code |
+> | `$dumpvars` / `$dumpfile` for waveforms | `tb.export_waveform("file.skw.gz")` | Waveform generation without modifying the testbench code |
 > | No type safety for port values | Rust type system prevents mixing signal types | Cannot accidentally pass a string where a number is expected |
 > | `$random` for randomization | Rust `rand` crate, `proptest` for property-based testing | Full ecosystem of testing libraries |
 > | Separate compilation of TB and DUT | `cargo test` handles everything | One command builds, compiles C++ backend, and runs tests |
@@ -572,7 +572,7 @@ async fn test_uart_with_waveform_dump() {
     tb.clock(5).await;
 
     // Save waveform for manual inspection
-    tb.export_waveform("uart_debug.vcd").unwrap();
+    tb.export_waveform("uart_debug.skw.gz").unwrap();
 
     let received = read_rx_byte(&mut tb).await;
     assert_eq!(received, 0xAA);
@@ -668,11 +668,7 @@ Show `println!` output during tests:
 cargo test -- --nocapture
 ```
 
-Open a VCD waveform file generated by `export_waveform()` in GTKWave:
-
-```bash
-gtkwave uart_debug.vcd
-```
+Open the `.skw.gz` waveform file generated by `export_waveform()` in the skalp VS Code extension.
 
 ---
 
@@ -686,7 +682,7 @@ gtkwave uart_debug.vcd
 | Assert port value | `tb.expect("port", value).await` | `tb.expect("count", 42u32).await;` |
 | Advance N cycles | `tb.clock(n).await` | `tb.clock(434).await;` |
 | Assert then deassert reset | `tb.reset(n).await` | `tb.reset(2).await;` |
-| Save waveform | `tb.export_waveform("file.vcd").unwrap()` | `tb.export_waveform("debug.vcd").unwrap();` |
+| Save waveform | `tb.export_waveform("file.skw.gz").unwrap()` | `tb.export_waveform("debug.skw.gz").unwrap();` |
 | Test attribute | `#[tokio::test]` | `#[tokio::test] async fn test_foo() { ... }` |
 | Import testbench | `use skalp_testing::Testbench;` | Top of every test file |
 | Run all tests | `cargo test` | From project root |

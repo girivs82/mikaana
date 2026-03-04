@@ -7,7 +7,7 @@ summary: "Compile, simulate, and test your VHDL designs with skalp — no ModelS
 
 If you already write VHDL, you know the pain: expensive simulators, slow compile-edit-test cycles, and testbenches that are harder to write than the design itself. skalp changes the workflow while keeping your VHDL code exactly as it is.
 
-This tutorial walks through progressively complex VHDL designs — each one compiled with `skalp build`, simulated with `skalp sim`, and tested with Rust-based testbenches using `cargo test`. By the end, you will have:
+This tutorial walks through progressively complex VHDL designs — each one compiled with `skalp build` and tested with Rust-based testbenches using `cargo test`. By the end, you will have:
 
 - **Compiled** counters, multiplexers, FSMs, and bus systems with skalp's VHDL frontend
 - **Tested** every design with async Rust testbenches — no SystemVerilog testbench boilerplate
