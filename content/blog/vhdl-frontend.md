@@ -566,16 +566,11 @@ An honest list of what the VHDL frontend does not currently handle:
 These are simulation constructs. skalp's position is that simulation belongs in Rust testbenches, not in the HDL. This is a deliberate trade-off: engineers who want VHDL testbenches should use GHDL or a commercial simulator. Engineers who want modern testing infrastructure (async/await, property-based testing, parallel execution, coverage tracking) use skalp's testbench API.
 
 **Not yet implemented (future work):**
-- External names (`<< ... >>`) — VHDL-2008 hierarchical signal access
-- Conditional expressions (`x when condition else y`) — supported in concurrent and sequential assignments; not yet supported as subexpressions within larger expressions
-- Type bounds on generics (constraining generic types) — planned for Phase 2
 - Multi-dimensional array slicing
-- Some attribute semantics (`'subtype` on constrained subtypes)
 - Full constraint resolution for unconstrained subtypes
 
 **Known edge cases:**
 - Integer range types without explicit bounds default to 32-bit width (matching the VHDL LRM minimum range for `integer`)
-- Complex aggregate expressions with nested `others` may require explicit type qualification
 - Recursive function calls are unrolled up to 64 levels deep (inlining depth limit in the MIR pass); functions with more than 5 nested call sites are synthesized as separate modules rather than inlined
 
 ---
