@@ -63,14 +63,14 @@ See the [full changelog](https://github.com/girivs82/skalp/blob/main/CHANGELOG.m
 
 ### Pre-built binaries
 
-| Platform | Binary |
-|---|---|
-| Linux x86_64 | [`skalp-linux-x86_64`](https://github.com/girivs82/skalp/releases/tag/v0.2.0) |
-| macOS x86_64 | [`skalp-macos-x86_64`](https://github.com/girivs82/skalp/releases/tag/v0.2.0) |
-| macOS ARM64 | [`skalp-macos-arm64`](https://github.com/girivs82/skalp/releases/tag/v0.2.0) |
-| Windows x86_64 | [`skalp-windows-x86_64.exe`](https://github.com/girivs82/skalp/releases/tag/v0.2.0) |
+| Platform | Compiler | Debug Server |
+|---|---|---|
+| Linux x86_64 | [`skalp-linux-x86_64`](https://github.com/girivs82/skalp/releases/tag/v0.2.0) | [`skalp-debug-linux-x86_64`](https://github.com/girivs82/skalp/releases/tag/v0.2.0) |
+| macOS x86_64 | [`skalp-macos-x86_64`](https://github.com/girivs82/skalp/releases/tag/v0.2.0) | [`skalp-debug-macos-x86_64`](https://github.com/girivs82/skalp/releases/tag/v0.2.0) |
+| macOS ARM64 | [`skalp-macos-arm64`](https://github.com/girivs82/skalp/releases/tag/v0.2.0) | [`skalp-debug-macos-arm64`](https://github.com/girivs82/skalp/releases/tag/v0.2.0) |
+| Windows x86_64 | [`skalp-windows-x86_64.exe`](https://github.com/girivs82/skalp/releases/tag/v0.2.0) | [`skalp-debug-windows-x86_64.exe`](https://github.com/girivs82/skalp/releases/tag/v0.2.0) |
 
-Download the binary for your platform and add it to your `PATH`.
+Download both binaries for your platform and add them to your `PATH`. The debug server (`skalp-debug`) is needed for VS Code debugging support.
 
 ### VS Code extension
 
