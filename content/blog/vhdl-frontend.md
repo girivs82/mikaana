@@ -75,7 +75,15 @@ Non-synthesizable keywords — `wait`, `after`, `file`, `access`, `shared`, `tra
 
 **Stage 2: Parser.** A recursive descent parser using [rowan](https://github.com/rust-analyzer/rowan) for lossless syntax tree construction, producing approximately 150 syntax node types. The parser handles the full synthesizable grammar: entities, architectures, processes (with sensitivity lists), concurrent and sequential statements, type declarations (enumerations, records, arrays), generate statements, packages (including generic packages), component and entity instantiation, and VHDL-2019 interfaces and views.
 
-Error recovery is built in — a syntax error in one declaration doesn't prevent parsing the rest of the file. This matters for IDE integration, where partial files need to produce useful syntax trees.
+Error recovery is built in — a syntax error in one declaration doesn't prevent parsing the rest of the file. This matters for IDE integration, where partial files need to produce useful syntax trees. Errors are rendered with rustc-style diagnostics — source context, line numbers, and underlined spans — via `codespan-reporting`:
+
+```
+error: expected Colon, found InKw
+  ┌─ uart.vhd:5:12
+  │
+5 │   signal x std_logic;
+  │            ^^^^^^^^^^ expected Colon
+```
 
 **Stage 3: HIR Lowering.** The largest stage at over 4,500 lines. This is where VHDL semantics are mapped to skalp's IR:
 
@@ -273,7 +281,7 @@ skalp's VHDL frontend accepts only the synthesizable subset of VHDL. This is not
 - `disconnect` / `guard` — guarded signal resolution
 - Physical types (except time in generics) — units like `ns`, `ps`
 
-These are rejected at parse time, not at some downstream compilation stage. When the parser encounters `wait`, the error is immediate and specific: *"'wait' is not synthesizable; skalp targets RTL synthesis. Use Rust async testbenches for simulation control."*
+These are rejected at parse time, not at some downstream compilation stage. When the parser encounters `wait`, the error is immediate and specific — rendered with source context and an underlined span pointing at the offending keyword: *"wait statements are not synthesizable."*
 
 **Why exclude simulation constructs?** Because simulation and verification are handled by a different, better tool: the Rust async testbench ecosystem. VHDL's simulation constructs — `wait for 10 ns`, `assert`, `report`, file I/O — were designed in the 1980s for a world where the testbench and the design lived in the same language. That made sense when VHDL simulators were the only game in town.
 
@@ -568,6 +576,9 @@ These are simulation constructs. skalp's position is that simulation belongs in 
 **Not yet implemented (future work):**
 - Multi-dimensional array slicing
 - Full constraint resolution for unconstrained subtypes
+
+**Recently completed:**
+- **Rich error diagnostics** — Parse errors and HIR lowering warnings now render with rustc-style source context, line numbers, and underlined spans (via `codespan-reporting`), replacing the old raw byte-offset format. Both the VHDL and `.sk` frontends share the same diagnostic renderer.
 
 **Known edge cases:**
 - Integer range types without explicit bounds default to 32-bit width (matching the VHDL LRM minimum range for `integer`)
